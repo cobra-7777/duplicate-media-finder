@@ -174,7 +174,7 @@ def find_video_duplicates(folder_path, hash_threshold=2):
 
     for root, dirs, files in os.walk(folder_path):
         for file in files:
-            if file.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.mpeg', '.av1', '.m4s', '.mp4v', '.mpv', '')):  # Check for video file extensions
+            if file.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.mpeg', '.av1', '.m4s', '.mp4v', '.mpv')):  # Check for video file extensions
                 file_path = os.path.join(root, file)
                 video_hashes = calculate_dynamic_phash_for_frames(file_path)
 
@@ -197,3 +197,13 @@ def find_video_duplicates(folder_path, hash_threshold=2):
                     video_files_hash[file_path] = video_hashes
 
     return video_duplicates
+
+def get_video_resolution(video_path):
+    """
+    Get the resolution of a video as (width, height).
+    """
+    cap = cv2.VideoCapture(video_path)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    return width, height  # Return width and height as a tuple

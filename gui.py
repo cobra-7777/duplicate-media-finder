@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QPixmap, QFont, QImage
 from PyQt5.QtCore import Qt
-from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates  # Import the duplicate detection module
+from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates, get_video_resolution  # Import the duplicate detection module
 import os
 import random
 import cv2
@@ -12,12 +12,8 @@ from PIL import Image
 import numpy as np
 
 
-
-## TODO: Switch two images if you want the other one deleted instead
-## TODO: Video support?
 ## TODO: ICONS next to important stuff
 ## TODO: FONTS
-## TODO: FILE SHREDDING TOGGLE
 ## TODO: DISPLAY IMAGE SIZE
 
 def convert_frame_to_pixmap(frame):
@@ -172,20 +168,46 @@ class ComparisonWindow(QMainWindow):
             
             print(f"Comparing: {img1_name} (Resolution: {img1_resolution}) vs {img2_name} (Resolution: {img2_resolution})")
 
-            if img1_resolution >= img2_resolution:
+            if img1_resolution > img2_resolution:
                 to_keep_path, to_delete_path = img1_path, img2_path
                 to_keep_name, to_delete_name = img1_name, img2_name
                 to_keep_res, to_delete_res = img1_resolution, img2_resolution
                 to_keep_folder, to_delete_folder = img1_folder, img2_folder
                 to_keep_phash, to_delete_phash = img1_hash, img2_hash
-                print(f"Keeping {to_keep_name}, Deleting {to_delete_name}")
-            else:
+            elif img1_resolution < img2_resolution:
                 to_keep_path, to_delete_path = img2_path, img1_path
                 to_keep_name, to_delete_name = img2_name, img1_name
                 to_keep_res, to_delete_res = img2_resolution, img1_resolution
                 to_keep_folder, to_delete_folder = img2_folder, img1_folder
                 to_keep_phash, to_delete_phash = img2_hash, img1_hash
-                print(f"Keeping {to_keep_name}, Deleting {to_delete_name}")
+            else:
+                # Resolutions are equal, apply further checks
+                if len(img1_name) < len(img2_name):
+                    to_keep_path, to_delete_path = img1_path, img2_path
+                    to_keep_name, to_delete_name = img1_name, img2_name
+                    to_keep_res, to_delete_res = img1_resolution, img2_resolution
+                    to_keep_folder, to_delete_folder = img1_folder, img2_folder
+                    to_keep_phash, to_delete_phash = img1_hash, img2_hash
+                elif len(img1_name) > len(img2_name):
+                    to_keep_path, to_delete_path = img2_path, img1_path
+                    to_keep_name, to_delete_name = img2_name, img1_name
+                    to_keep_res, to_delete_res = img2_resolution, img1_resolution
+                    to_keep_folder, to_delete_folder = img2_folder, img1_folder
+                    to_keep_phash, to_delete_phash = img2_hash, img1_hash
+                else:
+                    # Name lengths are equal, prioritize alphabetically
+                    if img1_name < img2_name:
+                        to_keep_path, to_delete_path = img1_path, img2_path
+                        to_keep_name, to_delete_name = img1_name, img2_name
+                        to_keep_res, to_delete_res = img1_resolution, img2_resolution
+                        to_keep_folder, to_delete_folder = img1_folder, img2_folder
+                        to_keep_phash, to_delete_phash = img1_hash, img2_hash
+                    else:
+                        to_keep_path, to_delete_path = img2_path, img1_path
+                        to_keep_name, to_delete_name = img2_name, img1_name
+                        to_keep_res, to_delete_res = img2_resolution, img1_resolution
+                        to_keep_folder, to_delete_folder = img2_folder, img1_folder
+                        to_keep_phash, to_delete_phash = img2_hash, img1_hash
 
             # Horizontal layout for filenames and resolutions
             filenames_widget = QWidget()
@@ -387,6 +409,11 @@ class ComparisonWindowVideo(QMainWindow):
         # Scroll area for viewing duplicates
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 2px solid black;  /* Set border width, style, and color */
+            }
+        """)
 
         # Widget to hold all duplicate comparisons
         container_widget = QWidget()
@@ -394,6 +421,13 @@ class ComparisonWindowVideo(QMainWindow):
 
         # Layout to arrange the duplicate comparisons vertically
         layout = QVBoxLayout(container_widget)
+
+        # Define the maximum width for each image
+        max_image_width = 370
+        max_image_height = 500
+
+        # How many dupes
+        total_duplicates = len(duplicates)
 
         for index, (vid1_path, vid2_path) in enumerate(duplicates):
             comparison_widget = QWidget()
@@ -407,26 +441,101 @@ class ComparisonWindowVideo(QMainWindow):
             vid1_runtime = self.get_video_runtime(vid1_path)
             vid2_runtime = self.get_video_runtime(vid2_path)
 
+            vid1_resolution = get_video_resolution(vid1_path)
+            vid2_resolution = get_video_resolution(vid2_path)
+
+            vid1_name = os.path.basename(vid1_path)
+            vid2_name = os.path.basename(vid2_path)
+
+            #Determine which video to keep
+            if vid1_resolution[0] * vid1_resolution[1] > vid2_resolution[0] * vid2_resolution[1]:
+                to_keep_path, to_delete_path = vid1_path, vid2_path
+                to_keep_name, to_delete_name = vid1_name, vid2_name
+                to_keep_preview, to_delete_preview = vid1_preview, vid2_preview
+                to_keep_runtime, to_delete_runtime = vid1_runtime, vid2_runtime
+                to_keep_resolution, to_delete_resolution = vid1_resolution, vid2_resolution
+            elif vid1_resolution[0] * vid1_resolution[1] < vid2_resolution[0] * vid2_resolution[1]:
+                to_keep_path, to_delete_path = vid2_path, vid1_path
+                to_keep_name, to_delete_name = vid2_name, vid1_name
+                to_keep_preview, to_delete_preview = vid2_preview, vid1_preview
+                to_keep_runtime, to_delete_runtime = vid2_runtime, vid1_runtime
+                to_keep_resolution, to_delete_resolution = vid2_resolution, vid1_resolution
+            else:
+                # Resolutions are equal, apply further checks
+                if len(vid1_name) < len(vid2_name):
+                    to_keep_path, to_delete_path = vid1_path, vid2_path
+                    to_keep_name, to_delete_name = vid1_name, vid2_name
+                    to_keep_preview, to_delete_preview = vid1_preview, vid2_preview
+                    to_keep_runtime, to_delete_runtime = vid1_runtime, vid2_runtime
+                    to_keep_resolution, to_delete_resolution = vid1_resolution, vid2_resolution
+                elif len(vid1_name) > len(vid2_name):
+                    to_keep_path, to_delete_path = vid2_path, vid1_path
+                    to_keep_name, to_delete_name = vid2_name, vid1_name
+                    to_keep_preview, to_delete_preview = vid2_preview, vid1_preview
+                    to_keep_runtime, to_delete_runtime = vid2_runtime, vid1_runtime
+                    to_keep_resolution, to_delete_resolution = vid2_resolution, vid1_resolution
+                else:
+                    # Name lengths are equal, prioritize alphabetically
+                    if vid1_name < vid2_name:
+                        to_keep_path, to_delete_path = vid1_path, vid2_path
+                        to_keep_name, to_delete_name = vid1_name, vid2_name
+                        to_keep_preview, to_delete_preview = vid1_preview, vid2_preview
+                        to_keep_runtime, to_delete_runtime = vid1_runtime, vid2_runtime
+                        to_keep_resolution, to_delete_resolution = vid1_resolution, vid2_resolution
+                    else:
+                        to_keep_path, to_delete_path = vid2_path, vid1_path
+                        to_keep_name, to_delete_name = vid2_name, vid1_name
+                        to_keep_preview, to_delete_preview = vid2_preview, vid1_preview
+                        to_keep_runtime, to_delete_runtime = vid2_runtime, vid1_runtime
+                        to_keep_resolution, to_delete_resolution = vid2_resolution, vid1_resolution
+
+            # Format resolution for display
+            to_keep_resolution_str = f"{to_keep_resolution[0]}x{to_keep_resolution[1]}"
+            to_delete_resolution_str = f"{to_delete_resolution[0]}x{to_delete_resolution[1]}"
+            
             # Horizontal layout for previews and labels
+            filenames_widget = QWidget()
+            filenames_layout = QHBoxLayout(filenames_widget)
+            filenames_layout.setSpacing(10)
+
+            to_keep_name_label = QLabel(f"NAME: {to_keep_name}\nDURATION: {to_keep_runtime}\nRESOLUTION: {to_keep_resolution_str}")
+            to_keep_name_label.setAlignment(Qt.AlignLeft)
+            to_keep_name_label.setStyleSheet("color: green; font-weight: bold;")
+
+            to_delete_name_label = QLabel(f"NAME: {to_delete_name}\nDURATION: {to_delete_runtime}\nRESOLUTION: {to_delete_resolution_str}")
+            to_delete_name_label.setAlignment(Qt.AlignRight)
+            to_delete_name_label.setStyleSheet("color: red; font-weight: bold;")
+
+            filenames_layout.addWidget(to_keep_name_label)
+            filenames_layout.addStretch()
+            filenames_layout.addWidget(to_delete_name_label)
+
+            comparison_layout.addWidget(filenames_widget)
+
+            #Horizontal Layout for images
             images_widget = QWidget()
             images_layout = QHBoxLayout(images_widget)
             images_layout.setSpacing(10)
+            
+            to_keep_label = QLabel()
+            to_keep_pixmap = QPixmap(to_keep_preview)
+            to_keep_label.setPixmap(to_keep_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
 
-            vid1_label = QLabel()
-            vid1_label.setPixmap(vid1_preview.scaled(200, 150, Qt.KeepAspectRatio))
-            vid1_info = QLabel(f"{os.path.basename(vid1_path)}\nDuration: {vid1_runtime}")
+            to_delete_label = QLabel()
+            to_delete_pixmap = QPixmap(to_delete_preview)
+            to_delete_label.setPixmap(to_delete_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
 
-            vid2_label = QLabel()
-            vid2_label.setPixmap(vid2_preview.scaled(200, 150, Qt.KeepAspectRatio))
-            vid2_info = QLabel(f"{os.path.basename(vid2_path)}\nDuration: {vid2_runtime}")
-
-            images_layout.addWidget(vid1_label)
-            images_layout.addWidget(vid1_info)
             images_layout.addStretch()
-            images_layout.addWidget(vid2_label)
-            images_layout.addWidget(vid2_info)
+            images_layout.addWidget(to_keep_label)
+            images_layout.addStretch()
+            images_layout.addWidget(to_delete_label)
+            images_layout.addStretch()
 
             comparison_layout.addWidget(images_widget)
+
+            # Add space above checkbox
+            space_above_checkbox = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            comparison_layout.addItem(space_above_checkbox)
 
             # Add a checkbox below the videos to decide deletion
             checkbox_layout = QHBoxLayout()
@@ -440,7 +549,11 @@ class ComparisonWindowVideo(QMainWindow):
             comparison_layout.addLayout(checkbox_layout)
 
             # Store the checkbox and the paths in the dictionary
-            self.checkboxes[delete_checkbox] = (vid1_path, vid2_path)
+            self.checkboxes[delete_checkbox] = (to_keep_path, to_delete_path) # MAKE RESOLUTION COMPARISON TO "to_keep_path" variable
+
+            # Add space between the images and the separator
+            space_above_separator = QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            comparison_layout.addItem(space_above_separator)
 
             # Conditionally add a separator if this is not the last entry
             if index < len(duplicates) - 1:
@@ -451,6 +564,10 @@ class ComparisonWindowVideo(QMainWindow):
                 comparison_layout.addWidget(separator)
 
             layout.addWidget(comparison_widget)
+
+        # Instead of addStretch() here, use QSpacerItem to avoid excessive space
+        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        comparison_layout.addItem(spacer)
 
         main_layout.addWidget(scroll_area)
 
