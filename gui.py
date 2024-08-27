@@ -1,12 +1,20 @@
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame
+    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame, QSpacerItem, QSizePolicy
 )
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
-from duplicate_detector import find_duplicates  # Import the duplicate detection module
+from duplicate_detector import find_duplicates, get_image_resolution  # Import the duplicate detection module
 import os
 
+
+## TODO: Switch two images if you want the other one deleted instead
+## TODO: Video support?
+## TODO: ICONS next to important stuff
+## TODO: FONTS
+## TODO: FILE SHREDDING TOGGLE
+## TODO: DISPLAY IMAGE SIZE
+## TODO: DELETE FUNCTIONALITY
 
 class DuplicateImageFinder(QMainWindow):
     def __init__(self):
@@ -80,17 +88,17 @@ class ComparisonWindow(QMainWindow):
         titles_widget = QWidget()
         titles_layout = QHBoxLayout(titles_widget)
 
-        to_delete_label = QLabel("To Be Deleted")
         to_keep_label = QLabel("To Keep")
+        to_delete_label = QLabel("To Be Deleted")
 
-        to_delete_label.setFont(QFont('Palatino Linotype', 20))
         to_keep_label.setFont(QFont('Palatino Linotype', 20))
+        to_delete_label.setFont(QFont('Palatino Linotype', 20))
 
-        to_delete_label.setAlignment(Qt.AlignCenter)
         to_keep_label.setAlignment(Qt.AlignCenter)
+        to_delete_label.setAlignment(Qt.AlignCenter)
 
         titles_layout.addWidget(to_keep_label)
-        titles_layout.addStretch()  # Add some space between the titles
+        titles_layout.addStretch()
         titles_layout.addWidget(to_delete_label)
 
         main_layout.addWidget(titles_widget)
@@ -107,65 +115,88 @@ class ComparisonWindow(QMainWindow):
         layout = QVBoxLayout(container_widget)
 
         # Define the maximum width for each image
-        max_image_width = 370  # Slightly reduced to prevent horizontal scrolling
-        max_image_height = 500  # Adjusted for best viewing experience
+        max_image_width = 370
+        max_image_height = 500
 
-        for img1_path, img2_path in duplicates:
+        for img1_path, img2_path, img1_hash, img2_hash in duplicates:
             comparison_widget = QWidget()
             comparison_layout = QVBoxLayout(comparison_widget)
-            comparison_layout.setSpacing(0)  # Remove space between widgets
+            comparison_layout.setSpacing(0)
 
-            # Horizontal layout for filenames
+            # Determine which image is to be kept (higher resolution)
+            img1_name = os.path.basename(img1_path)
+            img2_name = os.path.basename(img2_path)
+            img1_resolution = get_image_resolution(img1_path)[1]
+            img2_resolution = get_image_resolution(img2_path)[1]
+            img1_folder = os.path.basename(os.path.dirname(img1_path))
+            img2_folder = os.path.basename(os.path.dirname(img2_path))
+            
+
+            if img1_resolution >= img2_resolution:
+                to_keep_path, to_delete_path = img1_path, img2_path
+                to_keep_name, to_delete_name = img1_name, img2_name
+                to_keep_res, to_delete_res = img1_resolution, img2_resolution
+                to_keep_folder, to_delete_folder = img1_folder, img2_folder
+                to_keep_phash, to_delete_phash = img1_hash, img2_hash
+            else:
+                to_keep_path, to_delete_path = img2_path, img1_path
+                to_keep_name, to_delete_name = img2_name, img1_name
+                to_keep_res, to_delete_res = img2_resolution, img1_resolution
+                to_keep_folder, to_delete_folder = img2_folder, img1_folder
+                to_keep_phash, to_delete_phash = img2_hash, img1_hash
+
+            # Horizontal layout for filenames and resolutions
             filenames_widget = QWidget()
             filenames_layout = QHBoxLayout(filenames_widget)
-            filenames_layout.setSpacing(0)  # Remove space between filenames and images
+            filenames_layout.setSpacing(10)
 
-            img1_name = QLabel(os.path.basename(img1_path))
-            img1_name.setAlignment(Qt.AlignHCenter)
-            img1_name.setContentsMargins(0, 0, 0, 0)
-            img1_name.setFixedSize(img1_name.sizeHint())  # Ensures the QLabel is tightly sized
-            img1_name.setStyleSheet("border: none;")  # Removes any border that might add extra space
-            img2_name = QLabel(os.path.basename(img2_path))
-            img2_name.setAlignment(Qt.AlignHCenter)
-            img2_name.setContentsMargins(0, 0, 0, 0)
-            img2_name.setFixedSize(img2_name.sizeHint())  # Ensures the QLabel is tightly sized
-            img2_name.setStyleSheet("border: none;")  # Removes any border that might add extra space
-            filenames_layout.addWidget(img1_name)
+            to_keep_name_label = QLabel(f"NAME: {to_keep_name}\nRESOLUTION: {to_keep_res[0]}x{to_keep_res[1]}\nP-HASH: {to_keep_phash}\nLOCATION: {to_keep_folder}")
+            to_keep_name_label.setAlignment(Qt.AlignLeft)
+            to_keep_name_label.setStyleSheet("color: green; font-weight: bold;")
+
+            to_delete_name_label = QLabel(f"NAME: {to_delete_name}\nRESOLUTION: {to_delete_res[0]}x{to_delete_res[1]}\nP-HASH: {to_delete_phash}\nLOCATION: {to_delete_folder}")
+            to_delete_name_label.setAlignment(Qt.AlignRight)
+            to_delete_name_label.setStyleSheet("color: red; font-weight: bold;")
+
+            filenames_layout.addWidget(to_keep_name_label)
             filenames_layout.addStretch()
-            filenames_layout.addWidget(img2_name)
+            filenames_layout.addWidget(to_delete_name_label)
 
             comparison_layout.addWidget(filenames_widget)
 
             # Horizontal layout for images
             images_widget = QWidget()
             images_layout = QHBoxLayout(images_widget)
-            images_layout.setSpacing(0)  # Remove space between images
+            images_layout.setSpacing(10)
 
-            img1_label = QLabel()
-            img1_pixmap = QPixmap(img1_path)
-            img1_label.setPixmap(img1_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
+            to_keep_label = QLabel()
+            to_keep_pixmap = QPixmap(to_keep_path)
+            to_keep_label.setPixmap(to_keep_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
 
-            img2_label = QLabel()
-            img2_pixmap = QPixmap(img2_path)
-            img2_label.setPixmap(img2_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
+            to_delete_label = QLabel()
+            to_delete_pixmap = QPixmap(to_delete_path)
+            to_delete_label.setPixmap(to_delete_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
 
             images_layout.addStretch()
-            images_layout.addWidget(img1_label)
+            images_layout.addWidget(to_keep_label)
             images_layout.addStretch()
-            images_layout.addWidget(img2_label)
+            images_layout.addWidget(to_delete_label)
             images_layout.addStretch()
 
             comparison_layout.addWidget(images_widget)
-            comparison_layout.addStretch()
 
             # Separator
             separator = QFrame()
             separator.setFrameShape(QFrame.HLine)
             separator.setFrameShadow(QFrame.Sunken)
-            separator.setStyleSheet("background-color: black; height: 3px;")
+            separator.setStyleSheet("background-color: black; height: 4px;")
             comparison_layout.addWidget(separator)
-            comparison_layout.addStretch()
+
             layout.addWidget(comparison_widget)
+
+        # Instead of addStretch() here, use QSpacerItem to avoid excessive space
+        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        comparison_layout.addItem(spacer)
 
         main_layout.addWidget(scroll_area)
 
@@ -174,14 +205,9 @@ class ComparisonWindow(QMainWindow):
         delete_button.clicked.connect(self.delete_duplicates)
         main_layout.addWidget(delete_button)
 
-        # Set scroll area
-        scroll_area.setGeometry(50, 50, 800, 800)  # Increased the size of the scroll area
-        scroll_area.move(50, 50)  # Position the scroll area within the window
-
         central_widget = QWidget()
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
-
 
 
     def delete_duplicates(self):
