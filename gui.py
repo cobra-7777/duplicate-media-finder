@@ -1,11 +1,16 @@
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame, QSpacerItem, QSizePolicy
+    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame, QSpacerItem, QSizePolicy, QCheckBox, QDialog, QComboBox, QRadioButton
 )
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtGui import QPixmap, QFont, QImage
 from PyQt5.QtCore import Qt
-from duplicate_detector import find_duplicates, get_image_resolution  # Import the duplicate detection module
+from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates  # Import the duplicate detection module
 import os
+import random
+import cv2
+from PIL import Image
+import numpy as np
+
 
 
 ## TODO: Switch two images if you want the other one deleted instead
@@ -14,7 +19,15 @@ import os
 ## TODO: FONTS
 ## TODO: FILE SHREDDING TOGGLE
 ## TODO: DISPLAY IMAGE SIZE
-## TODO: DELETE FUNCTIONALITY
+
+def convert_frame_to_pixmap(frame):
+    """
+    Convert an OpenCV frame to QPixmap for display.
+    """
+    height, width, channel = frame.shape
+    bytes_per_line = 3 * width
+    q_image = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
+    return QPixmap.fromImage(q_image)
 
 class DuplicateImageFinder(QMainWindow):
     def __init__(self):
@@ -22,7 +35,9 @@ class DuplicateImageFinder(QMainWindow):
 
         # Set the title and locked size of the window
         self.setWindowTitle('Duplicate Image Finder')
-        self.setFixedSize(900, 900)  # Increase the window size to accommodate larger scroll area
+        self.width = 700
+        self.height = 500
+        self.setFixedSize(self.width, self.height)  # Increase the window size to accommodate larger scroll area
 
         # Logo
         self.logo_label = QLabel(self)
@@ -30,24 +45,33 @@ class DuplicateImageFinder(QMainWindow):
         self.logo_label.setPixmap(self.logo_pixmap.scaled(150, 150, Qt.KeepAspectRatio))
         self.logo_label.setAlignment(Qt.AlignCenter)
         self.logo_label.setFixedSize(150, 150)
-        self.logo_label.move(375, 50)  # Center the logo at the top
+        self.logo_label.move((self.width - 150) // 2, 50)  # Center the logo at the top
 
         # Button to choose folder
         self.folder_button = QPushButton('Choose Folder', self)
         self.folder_button.setFixedSize(150, 40)
-        self.folder_button.move(375, 250)  # Center the button below the logo
+        self.folder_button.move((self.width - 150) // 2, 250)  # Center the button below the logo
         self.folder_button.clicked.connect(self.choose_folder)
 
         # Label to show the chosen folder path
         self.folder_label = QLabel('No folder chosen', self)
         self.folder_label.setFixedSize(400, 40)
         self.folder_label.setAlignment(Qt.AlignCenter)
-        self.folder_label.move(250, 320)  # Center this label below the button
+        self.folder_label.move((self.width - 400) // 2, 320)  # Center this label below the button
+
+        #Radio buttons
+        self.photo_radio = QRadioButton('Search for Photo Duplicates', self)
+        self.video_radio = QRadioButton('Search for Video Duplicates', self)
+        self.photo_radio.setFixedSize(155,30)
+        self.video_radio.setFixedSize(155,30)
+        self.photo_radio.setChecked(True)
+        self.photo_radio.move((self.width - 155) // 2, 340)
+        self.video_radio.move((self.width - 155) // 2, 360)
 
         # Start button
         self.start_button = QPushButton('Start', self)
         self.start_button.setFixedSize(150, 40)
-        self.start_button.move(375, 400)  # Center the button below the folder label
+        self.start_button.move((self.width - 150) // 2, 400)  # Center the button below the folder label
         self.start_button.clicked.connect(self.start_processing)
 
         # Store the selected folder path
@@ -60,14 +84,18 @@ class DuplicateImageFinder(QMainWindow):
             self.folder_label.setText(f'Selected Folder: {folder}')
 
     def start_processing(self):
-        if self.selected_folder:
-            duplicates = find_duplicates(self.selected_folder)
-            if duplicates:
-                self.show_comparison_window(duplicates)
-            else:
-                QMessageBox.information(self, 'No Duplicates Found', 'No duplicate images found in the selected folder.')
+        if hasattr(self, 'selected_folder'):
+            if self.photo_radio.isChecked():
+                duplicates = find_duplicates(self.selected_folder)  # Use your existing logic for photos
+                self.comparison_window = ComparisonWindow(duplicates)
+                self.comparison_window.show()
+            elif self.video_radio.isChecked():
+                video_duplicates = find_video_duplicates(self.selected_folder)  # Use your new logic for videos
+                self.comparison_window_video = ComparisonWindowVideo(video_duplicates)
+                self.comparison_window_video.show()
         else:
-            QMessageBox.warning(self, 'No Folder Selected', 'Please choose a folder first!')
+            QMessageBox.warning(self, "No Folder Selected", "Please choose a folder first.")
+
 
     def show_comparison_window(self, duplicates):
         self.comparison_window = ComparisonWindow(duplicates)
@@ -79,7 +107,7 @@ class ComparisonWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle('Review Duplicates')
-        self.setFixedSize(900, 900)  # Increase window size
+        self.setFixedSize(1000, 900)  # Increase window size
 
         # Main layout for the entire window
         main_layout = QVBoxLayout()
@@ -106,6 +134,11 @@ class ComparisonWindow(QMainWindow):
         # Scroll area for viewing duplicates
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 2px solid black;  /* Set border width, style, and color */
+            }
+        """)
 
         # Widget to hold all duplicate comparisons
         container_widget = QWidget()
@@ -118,7 +151,13 @@ class ComparisonWindow(QMainWindow):
         max_image_width = 370
         max_image_height = 500
 
-        for img1_path, img2_path, img1_hash, img2_hash in duplicates:
+        # Store and associate checkboxes
+        self.checkboxes = {}
+
+        # How many dupes
+        total_duplicates = len(duplicates)
+
+        for index, (img1_path, img2_path, img1_hash, img2_hash) in enumerate(duplicates):
             comparison_widget = QWidget()
             comparison_layout = QVBoxLayout(comparison_widget)
             comparison_layout.setSpacing(0)
@@ -131,6 +170,7 @@ class ComparisonWindow(QMainWindow):
             img1_folder = os.path.basename(os.path.dirname(img1_path))
             img2_folder = os.path.basename(os.path.dirname(img2_path))
             
+            print(f"Comparing: {img1_name} (Resolution: {img1_resolution}) vs {img2_name} (Resolution: {img2_resolution})")
 
             if img1_resolution >= img2_resolution:
                 to_keep_path, to_delete_path = img1_path, img2_path
@@ -138,12 +178,14 @@ class ComparisonWindow(QMainWindow):
                 to_keep_res, to_delete_res = img1_resolution, img2_resolution
                 to_keep_folder, to_delete_folder = img1_folder, img2_folder
                 to_keep_phash, to_delete_phash = img1_hash, img2_hash
+                print(f"Keeping {to_keep_name}, Deleting {to_delete_name}")
             else:
                 to_keep_path, to_delete_path = img2_path, img1_path
                 to_keep_name, to_delete_name = img2_name, img1_name
                 to_keep_res, to_delete_res = img2_resolution, img1_resolution
                 to_keep_folder, to_delete_folder = img2_folder, img1_folder
                 to_keep_phash, to_delete_phash = img2_hash, img1_hash
+                print(f"Keeping {to_keep_name}, Deleting {to_delete_name}")
 
             # Horizontal layout for filenames and resolutions
             filenames_widget = QWidget()
@@ -185,12 +227,35 @@ class ComparisonWindow(QMainWindow):
 
             comparison_layout.addWidget(images_widget)
 
+            # Add space above checkbox
+            space_above_checkbox = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            comparison_layout.addItem(space_above_checkbox)
+
+            # Add a checkbox below the images to decide deletion
+            checkbox_layout = QHBoxLayout()
+            checkbox_layout.addStretch()
+
+            delete_checkbox = QCheckBox("Mark for deletion")
+            delete_checkbox.setChecked(True)  # Default to checked
+            checkbox_layout.addWidget(delete_checkbox)
+
+            checkbox_layout.addStretch()
+            comparison_layout.addLayout(checkbox_layout)
+
+            self.checkboxes[delete_checkbox] = (to_keep_path, to_delete_path)
+
+            # Add space between the images and the separator
+            space_above_separator = QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            comparison_layout.addItem(space_above_separator)
+
             # Separator
-            separator = QFrame()
-            separator.setFrameShape(QFrame.HLine)
-            separator.setFrameShadow(QFrame.Sunken)
-            separator.setStyleSheet("background-color: black; height: 4px;")
-            comparison_layout.addWidget(separator)
+            if index < total_duplicates - 1:
+                separator = QFrame()
+                separator.setFrameShape(QFrame.HLine)
+                separator.setFrameShadow(QFrame.Plain)
+                separator.setStyleSheet("background-color: black;")
+                separator.setMinimumHeight(4)
+                comparison_layout.addWidget(separator)
 
             layout.addWidget(comparison_widget)
 
@@ -209,11 +274,258 @@ class ComparisonWindow(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
-
     def delete_duplicates(self):
-        # Here you'd implement the deletion logic
-        QMessageBox.information(self, 'Delete Duplicates', 'Duplicates have been deleted!')
-        self.close()
+        # Count files marked for deletion
+        files_to_delete = [(to_delete_path, to_keep_path) for checkbox, (to_keep_path, to_delete_path) in self.checkboxes.items() if checkbox.isChecked()]
+
+        if not files_to_delete:
+            QMessageBox.information(self, "No Files Selected", "No files are marked for deletion.")
+            return
+
+        # Show deletion confirmation dialog
+        dialog = DeletionConfirmationDialog(len(files_to_delete))
+        if dialog.exec_() == QDialog.Accepted:
+            deletion_type = dialog.get_deletion_type()
+
+            for to_delete_path, to_keep_path in files_to_delete:
+                # Log which files are being kept and deleted
+                print(f"Keeping {to_keep_path}, Deleting {to_delete_path}")
+
+                try:
+                    if deletion_type == "Normal Deletion":
+                        os.remove(to_delete_path)
+                        print(f"File deleted: {to_delete_path}")
+                    elif "Shred" in deletion_type:
+                        if "1 Pass" in deletion_type:
+                            shred_file(to_delete_path, passes=1)
+                        elif "7 Passes" in deletion_type:
+                            shred_file(to_delete_path, passes=7)
+                        elif "15 Passes" in deletion_type:
+                            shred_file(to_delete_path, passes=15)
+                except Exception as e:
+                    print(f"Error deleting file {to_delete_path}: {e}")
+
+            QMessageBox.information(self, "Deletion Complete", f"{len(files_to_delete)} files have been deleted.")
+
+
+class DeletionConfirmationDialog(QDialog):
+    def __init__(self, num_files):
+        super().__init__()
+        self.setWindowTitle("Confirm Deletion")
+        self.setFixedSize(300, 200)
+
+        layout = QVBoxLayout()
+
+        # Number of files to delete
+        label = QLabel(f"Number of images marked for deletion: {num_files}")
+        layout.addWidget(label)
+
+        # Dropdown for deletion type
+        self.deletion_type_combo = QComboBox()
+        self.deletion_type_combo.addItems(["Normal Deletion", "Shred (1 Pass)", "Shred (7 Passes)", "Shred (15 Passes)"])
+        layout.addWidget(self.deletion_type_combo)
+
+        # Confirm button
+        confirm_button = QPushButton("Delete")
+        confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
+        layout.addWidget(confirm_button)
+
+        self.setLayout(layout)
+
+    def get_deletion_type(self):
+        return self.deletion_type_combo.currentText()
+    
+
+def shred_file(file_path, passes=1):
+    """
+    Shred a file by overwriting it with random data for a specified number of passes.
+    """
+    try:
+        with open(file_path, "r+b") as f:
+            length = os.path.getsize(file_path)
+            for _ in range(passes):
+                f.seek(0)
+                f.write(bytearray(random.getrandbits(8) for _ in range(length)))
+        os.remove(file_path)
+        print(f"File shredded: {file_path}")
+    except Exception as e:
+        print(f"Error shredding file {file_path}: {e}")
+
+
+class ComparisonWindowVideo(QMainWindow):
+    def __init__(self, duplicates):
+        super().__init__()
+
+        self.setWindowTitle('Review Video Duplicates')
+        self.setFixedSize(1000, 900)
+
+        # Main layout for the entire window
+        main_layout = QVBoxLayout()
+
+        # Store references to checkboxes and associated paths
+        self.checkboxes = {}
+
+        # Titles layout
+        titles_widget = QWidget()
+        titles_layout = QHBoxLayout(titles_widget)
+
+        to_keep_label = QLabel("To Keep")
+        to_delete_label = QLabel("To Be Deleted")
+
+        to_keep_label.setFont(QFont('Palatino Linotype', 20))
+        to_delete_label.setFont(QFont('Palatino Linotype', 20))
+
+        to_keep_label.setAlignment(Qt.AlignCenter)
+        to_delete_label.setAlignment(Qt.AlignCenter)
+
+        titles_layout.addWidget(to_keep_label)
+        titles_layout.addStretch()
+        titles_layout.addWidget(to_delete_label)
+
+        main_layout.addWidget(titles_widget)
+
+        # Scroll area for viewing duplicates
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+
+        # Widget to hold all duplicate comparisons
+        container_widget = QWidget()
+        scroll_area.setWidget(container_widget)
+
+        # Layout to arrange the duplicate comparisons vertically
+        layout = QVBoxLayout(container_widget)
+
+        for index, (vid1_path, vid2_path) in enumerate(duplicates):
+            comparison_widget = QWidget()
+            comparison_layout = QVBoxLayout(comparison_widget)
+            comparison_layout.setSpacing(0)
+
+            # Extract frame from middle of video for preview
+            vid1_preview = self.get_video_frame_preview(vid1_path)
+            vid2_preview = self.get_video_frame_preview(vid2_path)
+
+            vid1_runtime = self.get_video_runtime(vid1_path)
+            vid2_runtime = self.get_video_runtime(vid2_path)
+
+            # Horizontal layout for previews and labels
+            images_widget = QWidget()
+            images_layout = QHBoxLayout(images_widget)
+            images_layout.setSpacing(10)
+
+            vid1_label = QLabel()
+            vid1_label.setPixmap(vid1_preview.scaled(200, 150, Qt.KeepAspectRatio))
+            vid1_info = QLabel(f"{os.path.basename(vid1_path)}\nDuration: {vid1_runtime}")
+
+            vid2_label = QLabel()
+            vid2_label.setPixmap(vid2_preview.scaled(200, 150, Qt.KeepAspectRatio))
+            vid2_info = QLabel(f"{os.path.basename(vid2_path)}\nDuration: {vid2_runtime}")
+
+            images_layout.addWidget(vid1_label)
+            images_layout.addWidget(vid1_info)
+            images_layout.addStretch()
+            images_layout.addWidget(vid2_label)
+            images_layout.addWidget(vid2_info)
+
+            comparison_layout.addWidget(images_widget)
+
+            # Add a checkbox below the videos to decide deletion
+            checkbox_layout = QHBoxLayout()
+            checkbox_layout.addStretch()
+
+            delete_checkbox = QCheckBox("Mark for deletion")
+            delete_checkbox.setChecked(True)  # Default to checked
+            checkbox_layout.addWidget(delete_checkbox)
+
+            checkbox_layout.addStretch()
+            comparison_layout.addLayout(checkbox_layout)
+
+            # Store the checkbox and the paths in the dictionary
+            self.checkboxes[delete_checkbox] = (vid1_path, vid2_path)
+
+            # Conditionally add a separator if this is not the last entry
+            if index < len(duplicates) - 1:
+                separator = QFrame()
+                separator.setFrameShape(QFrame.HLine)
+                separator.setFrameShadow(QFrame.Sunken)
+                separator.setStyleSheet("background-color: black; height: 4px;")
+                comparison_layout.addWidget(separator)
+
+            layout.addWidget(comparison_widget)
+
+        main_layout.addWidget(scroll_area)
+
+        # Delete button at the bottom
+        delete_button = QPushButton('Delete Duplicates', self)
+        delete_button.clicked.connect(self.delete_duplicates)
+        main_layout.addWidget(delete_button)
+
+        central_widget = QWidget()
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
+
+    def get_video_frame_preview(self, video_path):
+        """
+        Extract a frame from the middle of the video to use as a preview.
+        """
+        frame_count = get_frame_count(video_path)
+        middle_frame = frame_count // 2
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+        ret, frame = cap.read()
+        cap.release()
+
+        if ret:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return convert_frame_to_pixmap(frame_rgb)
+        else:
+            return QPixmap()  # Return empty pixmap if failed
+
+    def get_video_runtime(self, video_path):
+        """
+        Get the runtime (duration) of the video in HH:MM:SS format.
+        """
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+
+        total_seconds = frame_count / fps
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = int(total_seconds % 60)
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+    def delete_duplicates(self):
+        # Similar logic as the ComparisonWindow class
+        files_to_delete = [to_delete_path for checkbox, (to_keep_path, to_delete_path) in self.checkboxes.items() if checkbox.isChecked()]
+
+        if not files_to_delete:
+            QMessageBox.information(self, "No Files Selected", "Please mark files for deletion.")
+            return
+
+        # Show deletion confirmation dialog
+        dialog = DeletionConfirmationDialog(len(files_to_delete))
+        if dialog.exec_() == QDialog.Accepted:
+            deletion_type = dialog.get_deletion_type()
+
+            for to_delete_path in files_to_delete:
+                print(f"Deleting {to_delete_path}")
+                try:
+                    if deletion_type == "Normal Deletion":
+                        os.remove(to_delete_path)
+                        print(f"File deleted: {to_delete_path}")
+                    elif "Shred" in deletion_type:
+                        if "1 Pass" in deletion_type:
+                            shred_file(to_delete_path, passes=1)
+                        elif "3 Passes" in deletion_type:
+                            shred_file(to_delete_path, passes=3)
+                        elif "7 Passes" in deletion_type:
+                            shred_file(to_delete_path, passes=7)
+                except Exception as e:
+                    print(f"Error deleting file {to_delete_path}: {e}")
+
+            QMessageBox.information(self, "Deletion Complete", f"{len(files_to_delete)} files have been deleted.")
+
 
 
 def main():
