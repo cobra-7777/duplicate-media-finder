@@ -15,6 +15,7 @@ import numpy as np
 ## TODO: ICONS next to important stuff
 ## TODO: FONTS
 ## TODO: DISPLAY IMAGE SIZE
+## TODO: Ui work, progress bar/dynamic loading icons
 
 def convert_frame_to_pixmap(frame):
     """
