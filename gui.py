@@ -10,12 +10,17 @@ import random
 import cv2
 from PIL import Image
 import numpy as np
+from pywinstyles import apply_style
 
 
 ## TODO: ICONS next to important stuff
 ## TODO: FONTS
 ## TODO: DISPLAY IMAGE SIZE
 ## TODO: Ui work, progress bar/dynamic loading icons
+## BUG: Not correct deletion when theres 3 duplicates in varying sizes. - might be fix, test 3 images in differing res
+## NAME: COPY CLEANER
+## TODO: Change button color etc, find a style, for example purple.
+## TODO: Back to main menu after deletion.
 
 def convert_frame_to_pixmap(frame):
     """
@@ -34,7 +39,12 @@ class DuplicateImageFinder(QMainWindow):
         self.setWindowTitle('Duplicate Image Finder')
         self.width = 700
         self.height = 500
-        self.setFixedSize(self.width, self.height)  # Increase the window size to accommodate larger scroll area
+        self.setFixedSize(self.width, self.height)
+        self.setStyleSheet('background-color: #111111;')
+        apply_style(self, "dark")
+
+        self.button_font = QFont('Impact', 16)
+        self.text_font = QFont('Impact', 11)
 
         # Logo
         self.logo_label = QLabel(self)
@@ -46,29 +56,85 @@ class DuplicateImageFinder(QMainWindow):
 
         # Button to choose folder
         self.folder_button = QPushButton('Choose Folder', self)
-        self.folder_button.setFixedSize(150, 40)
-        self.folder_button.move((self.width - 150) // 2, 250)  # Center the button below the logo
+        self.folder_button.setFixedSize(180, 40)
+        self.folder_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1E88E5;
+                border: 3px solid #1565C0;
+                border-radius: 10px;
+                color: black;
+            }
+            QPushButton:hover {
+                background-color: #64B5F6;
+                border-color: #1565C0;
+            }
+            QPushButton:pressed {
+                background-color: #1E88E5;
+                border-color: #1565C0;
+            }
+        """)
+        self.folder_button.setFont(self.button_font)
+        self.folder_button.move((self.width - 180) // 2, 220)  # Center the button below the logo
         self.folder_button.clicked.connect(self.choose_folder)
 
         # Label to show the chosen folder path
         self.folder_label = QLabel('No folder chosen', self)
-        self.folder_label.setFixedSize(400, 40)
+        self.folder_label.setFixedSize(680, 40)
         self.folder_label.setAlignment(Qt.AlignCenter)
-        self.folder_label.move((self.width - 400) // 2, 320)  # Center this label below the button
+        self.folder_label.setStyleSheet('color: white;')
+        self.folder_label.setFont(self.text_font)
+        self.folder_label.move((self.width - 680) // 2, 270)  # Center this label below the button
 
         #Radio buttons
         self.photo_radio = QRadioButton('Search for Photo Duplicates', self)
         self.video_radio = QRadioButton('Search for Video Duplicates', self)
-        self.photo_radio.setFixedSize(155,30)
-        self.video_radio.setFixedSize(155,30)
+        self.photo_radio.setFixedSize(180,30)
+        self.video_radio.setFixedSize(180,30)
         self.photo_radio.setChecked(True)
-        self.photo_radio.move((self.width - 155) // 2, 340)
-        self.video_radio.move((self.width - 155) // 2, 360)
+        self.photo_radio.move((self.width - 180) // 2, 310)
+        self.video_radio.move((self.width - 180) // 2, 340)
+        radio_button_style = """
+            QRadioButton {
+                color: white; /* Text color for a dark background */
+                background-color: transparent; /* Background color */
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QRadioButton::indicator::unchecked {
+                border: 1px solid white; /* Border for unchecked state */
+                background-color: #333333; /* Dark gray background for unchecked */
+            }
+            QRadioButton::indicator::checked {
+                border: 1px solid white; /* Border for checked state */
+                background-color: #00FF00; /* Green background for checked state */
+            }
+        """
+        self.photo_radio.setStyleSheet(radio_button_style)
+        self.video_radio.setStyleSheet(radio_button_style)
 
         # Start button
-        self.start_button = QPushButton('Start', self)
-        self.start_button.setFixedSize(150, 40)
-        self.start_button.move((self.width - 150) // 2, 400)  # Center the button below the folder label
+        self.start_button = QPushButton('Search for Duplicates', self)
+        self.start_button.setFixedSize(220, 45)
+        self.start_button.move((self.width - 220) // 2, 400)  # Center the button below the folder label
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1E88E5;
+                border: 3px solid #1565C0;
+                border-radius: 10px;
+                color: black;
+            }
+            QPushButton:hover {
+                background-color: #64B5F6;
+                border-color: #1565C0;
+            }
+            QPushButton:pressed {
+                background-color: #1E88E5;
+                border-color: #1565C0;
+            }
+        """)
+        self.start_button.setFont(self.button_font)
         self.start_button.clicked.connect(self.start_processing)
 
         # Store the selected folder path
@@ -81,22 +147,39 @@ class DuplicateImageFinder(QMainWindow):
             self.folder_label.setText(f'Selected Folder: {folder}')
 
     def start_processing(self):
-        if hasattr(self, 'selected_folder'):
-            if self.photo_radio.isChecked():
-                duplicates = find_duplicates(self.selected_folder)  # Use your existing logic for photos
-                self.comparison_window = ComparisonWindow(duplicates)
-                self.comparison_window.show()
-            elif self.video_radio.isChecked():
-                video_duplicates = find_video_duplicates(self.selected_folder)  # Use your new logic for videos
-                self.comparison_window_video = ComparisonWindowVideo(video_duplicates)
-                self.comparison_window_video.show()
+        if not self.selected_folder:
+            QMessageBox.critical(self, "Error", "Please choose a folder before processing!")
+            return
+        
+        if self.photo_radio.isChecked():
+            duplicates = find_duplicates(self.selected_folder)
+
+            if not duplicates:
+                QMessageBox.information(self, "No Duplicates Found", "No photo duplicates were found in the given folder.")
+                return
+            
+            self.show_comparison_window(duplicates)
+
+        elif self.video_radio.isChecked():
+            video_duplicates = find_video_duplicates(self.selected_folder)
+
+            if not video_duplicates:
+                QMessageBox.information(self, "No Duplicates Found", "No video duplicates were found in the given folder.")
+                return
+            
+            self.show_video_comparison_window(video_duplicates)
+        
         else:
-            QMessageBox.warning(self, "No Folder Selected", "Please choose a folder first.")
+            QMessageBox.critical(self, "Error", "Please choose either photo or video search.")
 
 
     def show_comparison_window(self, duplicates):
         self.comparison_window = ComparisonWindow(duplicates)
         self.comparison_window.show()
+
+    def show_video_comparison_window(self, duplicates):
+        self.video_comparison_window = ComparisonWindowVideo(duplicates)
+        self.video_comparison_window.show()
 
 
 class ComparisonWindow(QMainWindow):
