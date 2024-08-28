@@ -67,7 +67,7 @@ def process_image(file_path, target_size=(500, 500), min_size=(256, 256)):
         print(f"Skipping {file_path}: {e}")
         return None
 
-def find_duplicates(folder_path, target_size=(500, 500), min_size=(256, 256), hash_threshold=2):
+def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500), min_size=(256, 256), hash_threshold=2):
     """
     Find duplicate images in a given folder, ignoring resolution differences.
     Returns a list of tuples, where each tuple contains the paths of duplicate images and their pHashes.
@@ -83,6 +83,9 @@ def find_duplicates(folder_path, target_size=(500, 500), min_size=(256, 256), ha
             file_path = os.path.join(root, file)
             all_files.append(file_path)
 
+    total_files = len(all_files)
+    processed_count = 0
+
     # Use a ProcessPoolExecutor to process images in parallel
     with ProcessPoolExecutor() as executor:
         future_to_file = {executor.submit(process_image, file_path, target_size, min_size): file_path for file_path in all_files}
@@ -93,6 +96,10 @@ def find_duplicates(folder_path, target_size=(500, 500), min_size=(256, 256), ha
             if result is None:
                 continue
             results.append(result)
+
+            processed_count += 1
+            if progress_callback:
+                progress_callback(int((processed_count / total_files) * 100))
 
     # Sort results by resolution (highest to lowest)
     results.sort(key=lambda x: (-x[2], len(os.path.basename(x[0])), os.path.basename(x[0])))
@@ -189,14 +196,14 @@ def calculate_dynamic_phash_for_frames(video_path, percentages=[0.05, 0.5, 0.8])
             hashes.append(None)
     return hashes
 
-def find_video_duplicates(folder_path, hash_threshold=2):
+def find_video_duplicates(folder_path, progress_callback=None, hash_threshold=2):
     """
-    Find duplicate videos in a given folder by hashing multiple representative frames.
-    Returns a list of tuples, where each tuple contains the paths of duplicate videos and their frame hashes.
+    Find potential duplicate videos in a given folder by hashing multiple representative frames.
+    Returns a list of tuples, where each tuple contains the paths of potential duplicate videos and their frame hashes.
     """
     video_files_hash = {}
-    video_duplicates = []
-    processed_videos = set()  # Track videos that are already marked for deletion or processed
+    potential_duplicates = []  # Store potential duplicates
+    processed_videos = set()  # Track videos that are already processed
 
     # Collect all video file paths
     all_videos = []
@@ -205,6 +212,9 @@ def find_video_duplicates(folder_path, hash_threshold=2):
             if file.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.mpeg', '.av1', '.m4s', '.mp4v', '.mpv')):  # Check for video file extensions
                 file_path = os.path.join(root, file)
                 all_videos.append(file_path)
+
+    total_videos = len(all_videos)
+    processed_videos_count = 0
 
     # Process each video to get its representative frame hashes
     with ProcessPoolExecutor() as executor:
@@ -217,61 +227,48 @@ def find_video_duplicates(folder_path, hash_threshold=2):
             if result is None or any(h is None for h in result):
                 print(f"Skipping video due to frame extraction error: {file_path}")
                 continue
+
             # Calculate video resolution or other relevant metrics if needed
             video_resolution = get_video_resolution(file_path)
             results.append((file_path, result, video_resolution))
 
+            processed_videos_count += 1
+            if progress_callback:
+                progress_callback(int((processed_videos_count / total_videos) * 100))
+
     # Sort results by resolution (highest to lowest), then by filename length, then alphabetically
     results.sort(key=lambda x: (-x[2][0] * x[2][1], len(os.path.basename(x[0])), os.path.basename(x[0])))
 
-    # Compare each video against the highest resolution video in its duplicate set
+    # Identify potential duplicates without making a decision on which to keep or delete
     for i in range(len(results)):
         video_path1, video_hashes1, resolution1 = results[i]
         
         if video_path1 in processed_videos:
-            continue  # Skip already processed or deleted videos
-
-        # Use this video as the base for comparison in the current set
-        best_video = (video_path1, video_hashes1, resolution1)
-        best_path, best_hashes, best_resolution = best_video
+            continue  # Skip already processed videos
 
         for j in range(i + 1, len(results)):
             video_path2, video_hashes2, resolution2 = results[j]
 
             if video_path2 in processed_videos:
-                continue  # Skip already processed or deleted videos
+                continue  # Skip already processed videos
 
             # Ensure same number of frames checked
-            if len(best_hashes) != len(video_hashes2):
+            if len(video_hashes1) != len(video_hashes2):
                 continue
 
             # Calculate the Hamming distance between the frame hashes
             is_duplicate = all(
                 abs(imagehash.hex_to_hash(h1) - imagehash.hex_to_hash(h2)) <= hash_threshold
-                for h1, h2 in zip(best_hashes, video_hashes2)
+                for h1, h2 in zip(video_hashes1, video_hashes2)
             )
 
-            if is_duplicate:  # Check if all frame hashes are within the threshold
-                if resolution2[0] * resolution2[1] < best_resolution[0] * best_resolution[1]:
-                    # The second video is a duplicate and of lower resolution
-                    video_duplicates.append((video_path2, best_path))
-                    processed_videos.add(video_path2)  # Mark this video as processed
-                else:
-                    # If the new video is of higher resolution or equal but different, update best_video
-                    if resolution2[0] * resolution2[1] > best_resolution[0] * best_resolution[1] or \
-                       (resolution2 == best_resolution and len(os.path.basename(video_path2)) < len(os.path.basename(best_path))):
-                        # If resolution2 is better or same resolution but shorter name, update the best video
-                        processed_videos.add(best_path)  # The old best is now considered processed
-                        best_video = (video_path2, video_hashes2, resolution2)
-                        best_path, best_hashes, best_resolution = best_video
-                    # If they are equal in resolution and one should be kept over the other
-                    video_duplicates.append((best_path, video_path2))
-                    processed_videos.add(video_path2)
+            if is_duplicate:
+                potential_duplicates.append((video_path1, video_path2))  # Append potential duplicate pair
 
-        # Mark the current best video as processed after comparing with all others
-        processed_videos.add(best_path)
+        # Mark the current video as processed
+        processed_videos.add(video_path1)
 
-    return video_duplicates
+    return potential_duplicates
 
 def get_video_resolution(video_path):
     """
@@ -282,3 +279,18 @@ def get_video_resolution(video_path):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap.release()
     return width, height  # Return width and height as a tuple
+
+def get_video_runtime(video_path):
+        """
+        Get the runtime (duration) of the video in HH:MM:SS format.
+        """
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+
+        total_seconds = frame_count / fps
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = int(total_seconds % 60)
+        return f"{hours:02}:{minutes:02}:{seconds:02}"

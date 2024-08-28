@@ -1,10 +1,10 @@
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame, QSpacerItem, QSizePolicy, QCheckBox, QDialog, QComboBox, QRadioButton
+    QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame, QSpacerItem, QSizePolicy, QCheckBox, QDialog, QComboBox, QRadioButton, QProgressBar
 )
-from PyQt5.QtGui import QPixmap, QFont, QImage
-from PyQt5.QtCore import Qt
-from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates, get_video_resolution  # Import the duplicate detection module
+from PyQt5.QtGui import QPixmap, QFont, QImage, QIcon
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates, get_video_resolution, get_video_runtime  # Import the duplicate detection module
 import os
 import random
 import cv2
@@ -21,6 +21,12 @@ from pywinstyles import apply_style
 ## NAME: COPY CLEANER
 ## TODO: Change button color etc, find a style, for example purple.
 ## TODO: Back to main menu after deletion.
+## BUG: Hangout when having to draw large amount of photos in comparisonwindow
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 def convert_frame_to_pixmap(frame):
     """
@@ -36,11 +42,12 @@ class DuplicateImageFinder(QMainWindow):
         super().__init__()
 
         # Set the title and locked size of the window
-        self.setWindowTitle('Duplicate Image Finder')
-        self.width = 700
-        self.height = 500
+        self.setWindowTitle('CopyCleaner - Easy Media Deduplication')
+        self.width = 600
+        self.height = 700
         self.setFixedSize(self.width, self.height)
         self.setStyleSheet('background-color: #111111;')
+        self.setWindowIcon(QIcon(resource_path('resources/IconOnly.ico')))
         apply_style(self, "dark")
 
         self.button_font = QFont('Impact', 16)
@@ -48,11 +55,11 @@ class DuplicateImageFinder(QMainWindow):
 
         # Logo
         self.logo_label = QLabel(self)
-        self.logo_pixmap = QPixmap('path/to/your/logo.png')  # Replace with the path to your logo
-        self.logo_label.setPixmap(self.logo_pixmap.scaled(150, 150, Qt.KeepAspectRatio))
+        self.logo_pixmap = QPixmap(resource_path('resources/FullLogo.png'))  # Replace with the path to your logo
+        self.logo_label.setPixmap(self.logo_pixmap.scaled(300, 300, Qt.KeepAspectRatio))
         self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setFixedSize(150, 150)
-        self.logo_label.move((self.width - 150) // 2, 50)  # Center the logo at the top
+        self.logo_label.setFixedSize(300, 300)
+        self.logo_label.move((self.width - 300) // 2, 0)  # Center the logo at the top
 
         # Button to choose folder
         self.folder_button = QPushButton('Choose Folder', self)
@@ -74,25 +81,25 @@ class DuplicateImageFinder(QMainWindow):
             }
         """)
         self.folder_button.setFont(self.button_font)
-        self.folder_button.move((self.width - 180) // 2, 220)  # Center the button below the logo
+        self.folder_button.move((self.width - 180) // 2, 300)  # Center the button below the logo
         self.folder_button.clicked.connect(self.choose_folder)
 
         # Label to show the chosen folder path
         self.folder_label = QLabel('No folder chosen', self)
-        self.folder_label.setFixedSize(680, 40)
+        self.folder_label.setFixedSize(600, 40)
         self.folder_label.setAlignment(Qt.AlignCenter)
         self.folder_label.setStyleSheet('color: white;')
         self.folder_label.setFont(self.text_font)
-        self.folder_label.move((self.width - 680) // 2, 270)  # Center this label below the button
+        self.folder_label.move((self.width - 600) // 2, 340)  # Center this label below the button
 
         #Radio buttons
         self.photo_radio = QRadioButton('Search for Photo Duplicates', self)
         self.video_radio = QRadioButton('Search for Video Duplicates', self)
-        self.photo_radio.setFixedSize(180,30)
-        self.video_radio.setFixedSize(180,30)
+        self.photo_radio.setFixedSize(200,30)
+        self.video_radio.setFixedSize(200,30)
         self.photo_radio.setChecked(True)
-        self.photo_radio.move((self.width - 180) // 2, 310)
-        self.video_radio.move((self.width - 180) // 2, 340)
+        self.photo_radio.move((self.width - 200) // 2, 400)
+        self.video_radio.move((self.width - 200) // 2, 430)
         radio_button_style = """
             QRadioButton {
                 color: white; /* Text color for a dark background */
@@ -113,11 +120,13 @@ class DuplicateImageFinder(QMainWindow):
         """
         self.photo_radio.setStyleSheet(radio_button_style)
         self.video_radio.setStyleSheet(radio_button_style)
+        self.photo_radio.setFont(self.text_font)
+        self.video_radio.setFont(self.text_font)
 
         # Start button
         self.start_button = QPushButton('Search for Duplicates', self)
-        self.start_button.setFixedSize(220, 45)
-        self.start_button.move((self.width - 220) // 2, 400)  # Center the button below the folder label
+        self.start_button.setFixedSize(250, 55)
+        self.start_button.move((self.width - 250) // 2, 500)  # Center the button below the folder label
         self.start_button.setStyleSheet("""
             QPushButton {
                 background-color: #1E88E5;
@@ -137,8 +146,15 @@ class DuplicateImageFinder(QMainWindow):
         self.start_button.setFont(self.button_font)
         self.start_button.clicked.connect(self.start_processing)
 
+        # Progress bar (initially hidden)
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setFixedSize(400, 30)
+        self.progress_bar.move((self.width - 400) // 2, 500)  # Same position as the start button
+        self.progress_bar.setVisible(False)
+
         # Store the selected folder path
         self.selected_folder = None
+        self.worker_thread = None
 
     def choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Select Folder')
@@ -148,46 +164,56 @@ class DuplicateImageFinder(QMainWindow):
 
     def start_processing(self):
         if not self.selected_folder:
-            QMessageBox.critical(self, "Error", "Please choose a folder before processing!")
+            QMessageBox.critical(self, "Error", "Please choose a folder before starting!")
             return
-        
+
+        self.start_button.setVisible(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+
+        search_type = 'photo' if self.photo_radio.isChecked() else 'video'
+        self.worker_thread = DuplicateFinderWorker(self.selected_folder, search_type)
+        self.worker_thread.progress_update.connect(self.progress_bar.setValue)
+        self.worker_thread.comparison_complete.connect(self.on_comparison_complete)
+        self.worker_thread.start()
+
+    def on_comparison_complete(self, comparison_results):
+        if not comparison_results:
+            QMessageBox.information(self, "No Duplicates Found", "No duplicates were found in the selected folder.")
+            self.reset_ui()
+            return
+
+        # Prepare the comparison window based on the results
         if self.photo_radio.isChecked():
-            duplicates = find_duplicates(self.selected_folder)
-
-            if not duplicates:
-                QMessageBox.information(self, "No Duplicates Found", "No photo duplicates were found in the given folder.")
-                return
-            
-            self.show_comparison_window(duplicates)
-
+            self.show_comparison_window(comparison_results)
         elif self.video_radio.isChecked():
-            video_duplicates = find_video_duplicates(self.selected_folder)
+            self.show_comparison_window_videos(comparison_results)
 
-            if not video_duplicates:
-                QMessageBox.information(self, "No Duplicates Found", "No video duplicates were found in the given folder.")
-                return
-            
-            self.show_video_comparison_window(video_duplicates)
-        
-        else:
-            QMessageBox.critical(self, "Error", "Please choose either photo or video search.")
+        self.reset_ui()
+
+    def reset_ui(self):
+        """Reset the UI to initial state after processing is complete."""
+        self.start_button.setVisible(True)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
 
 
-    def show_comparison_window(self, duplicates):
-        self.comparison_window = ComparisonWindow(duplicates)
+    def show_comparison_window(self, comparison_results):
+        self.comparison_window = ComparisonWindow(comparison_results)
         self.comparison_window.show()
 
-    def show_video_comparison_window(self, duplicates):
-        self.video_comparison_window = ComparisonWindowVideo(duplicates)
-        self.video_comparison_window.show()
+    def show_comparison_window_videos(self, video_comparison_results):
+        self.comparison_window_videos = ComparisonWindowVideo(video_comparison_results)
+        self.comparison_window_videos.show()
 
 
 class ComparisonWindow(QMainWindow):
-    def __init__(self, duplicates):
+    def __init__(self, comparison_results):
         super().__init__()
 
         self.setWindowTitle('Review Duplicates')
         self.setFixedSize(1000, 900)  # Increase window size
+        apply_style(self, "dark")
 
         # Main layout for the entire window
         main_layout = QVBoxLayout()
@@ -235,63 +261,16 @@ class ComparisonWindow(QMainWindow):
         self.checkboxes = {}
 
         # How many dupes
-        total_duplicates = len(duplicates)
+        total_duplicates = len(comparison_results)
 
-        for index, (img1_path, img2_path, img1_hash, img2_hash) in enumerate(duplicates):
+        for index, (to_keep, to_delete) in enumerate(comparison_results):
+            # Extract precomputed data
+            to_keep_path, to_keep_name, to_keep_res, to_keep_folder, to_keep_phash = to_keep
+            to_delete_path, to_delete_name, to_delete_res, to_delete_folder, to_delete_phash = to_delete
+
             comparison_widget = QWidget()
             comparison_layout = QVBoxLayout(comparison_widget)
             comparison_layout.setSpacing(0)
-
-            # Determine which image is to be kept (higher resolution)
-            img1_name = os.path.basename(img1_path)
-            img2_name = os.path.basename(img2_path)
-            img1_resolution = get_image_resolution(img1_path)[1]
-            img2_resolution = get_image_resolution(img2_path)[1]
-            img1_folder = os.path.basename(os.path.dirname(img1_path))
-            img2_folder = os.path.basename(os.path.dirname(img2_path))
-            
-            print(f"Comparing: {img1_name} (Resolution: {img1_resolution}) vs {img2_name} (Resolution: {img2_resolution})")
-
-            if img1_resolution > img2_resolution:
-                to_keep_path, to_delete_path = img1_path, img2_path
-                to_keep_name, to_delete_name = img1_name, img2_name
-                to_keep_res, to_delete_res = img1_resolution, img2_resolution
-                to_keep_folder, to_delete_folder = img1_folder, img2_folder
-                to_keep_phash, to_delete_phash = img1_hash, img2_hash
-            elif img1_resolution < img2_resolution:
-                to_keep_path, to_delete_path = img2_path, img1_path
-                to_keep_name, to_delete_name = img2_name, img1_name
-                to_keep_res, to_delete_res = img2_resolution, img1_resolution
-                to_keep_folder, to_delete_folder = img2_folder, img1_folder
-                to_keep_phash, to_delete_phash = img2_hash, img1_hash
-            else:
-                # Resolutions are equal, apply further checks
-                if len(img1_name) < len(img2_name):
-                    to_keep_path, to_delete_path = img1_path, img2_path
-                    to_keep_name, to_delete_name = img1_name, img2_name
-                    to_keep_res, to_delete_res = img1_resolution, img2_resolution
-                    to_keep_folder, to_delete_folder = img1_folder, img2_folder
-                    to_keep_phash, to_delete_phash = img1_hash, img2_hash
-                elif len(img1_name) > len(img2_name):
-                    to_keep_path, to_delete_path = img2_path, img1_path
-                    to_keep_name, to_delete_name = img2_name, img1_name
-                    to_keep_res, to_delete_res = img2_resolution, img1_resolution
-                    to_keep_folder, to_delete_folder = img2_folder, img1_folder
-                    to_keep_phash, to_delete_phash = img2_hash, img1_hash
-                else:
-                    # Name lengths are equal, prioritize alphabetically
-                    if img1_name < img2_name:
-                        to_keep_path, to_delete_path = img1_path, img2_path
-                        to_keep_name, to_delete_name = img1_name, img2_name
-                        to_keep_res, to_delete_res = img1_resolution, img2_resolution
-                        to_keep_folder, to_delete_folder = img1_folder, img2_folder
-                        to_keep_phash, to_delete_phash = img1_hash, img2_hash
-                    else:
-                        to_keep_path, to_delete_path = img2_path, img1_path
-                        to_keep_name, to_delete_name = img2_name, img1_name
-                        to_keep_res, to_delete_res = img2_resolution, img1_resolution
-                        to_keep_folder, to_delete_folder = img2_folder, img1_folder
-                        to_keep_phash, to_delete_phash = img2_hash, img1_hash
 
             # Horizontal layout for filenames and resolutions
             filenames_widget = QWidget()
@@ -459,7 +438,7 @@ def shred_file(file_path, passes=1):
 
 
 class ComparisonWindowVideo(QMainWindow):
-    def __init__(self, duplicates):
+    def __init__(self, comparison_results):
         super().__init__()
 
         self.setWindowTitle('Review Video Duplicates')
@@ -511,67 +490,16 @@ class ComparisonWindowVideo(QMainWindow):
         max_image_height = 500
 
         # How many dupes
-        total_duplicates = len(duplicates)
+        total_duplicates = len(comparison_results)
 
-        for index, (vid1_path, vid2_path) in enumerate(duplicates):
+        for index, (to_keep, to_delete) in enumerate(comparison_results):
+            # Extract precomputed data
+            to_keep_path, to_keep_name, to_keep_runtime, to_keep_resolution, to_keep_preview = to_keep
+            to_delete_path, to_delete_name, to_delete_runtime, to_delete_resolution, to_delete_preview = to_delete
+
             comparison_widget = QWidget()
             comparison_layout = QVBoxLayout(comparison_widget)
             comparison_layout.setSpacing(0)
-
-            # Extract frame from middle of video for preview
-            vid1_preview = self.get_video_frame_preview(vid1_path)
-            vid2_preview = self.get_video_frame_preview(vid2_path)
-
-            vid1_runtime = self.get_video_runtime(vid1_path)
-            vid2_runtime = self.get_video_runtime(vid2_path)
-
-            vid1_resolution = get_video_resolution(vid1_path)
-            vid2_resolution = get_video_resolution(vid2_path)
-
-            vid1_name = os.path.basename(vid1_path)
-            vid2_name = os.path.basename(vid2_path)
-
-            #Determine which video to keep
-            if vid1_resolution[0] * vid1_resolution[1] > vid2_resolution[0] * vid2_resolution[1]:
-                to_keep_path, to_delete_path = vid1_path, vid2_path
-                to_keep_name, to_delete_name = vid1_name, vid2_name
-                to_keep_preview, to_delete_preview = vid1_preview, vid2_preview
-                to_keep_runtime, to_delete_runtime = vid1_runtime, vid2_runtime
-                to_keep_resolution, to_delete_resolution = vid1_resolution, vid2_resolution
-            elif vid1_resolution[0] * vid1_resolution[1] < vid2_resolution[0] * vid2_resolution[1]:
-                to_keep_path, to_delete_path = vid2_path, vid1_path
-                to_keep_name, to_delete_name = vid2_name, vid1_name
-                to_keep_preview, to_delete_preview = vid2_preview, vid1_preview
-                to_keep_runtime, to_delete_runtime = vid2_runtime, vid1_runtime
-                to_keep_resolution, to_delete_resolution = vid2_resolution, vid1_resolution
-            else:
-                # Resolutions are equal, apply further checks
-                if len(vid1_name) < len(vid2_name):
-                    to_keep_path, to_delete_path = vid1_path, vid2_path
-                    to_keep_name, to_delete_name = vid1_name, vid2_name
-                    to_keep_preview, to_delete_preview = vid1_preview, vid2_preview
-                    to_keep_runtime, to_delete_runtime = vid1_runtime, vid2_runtime
-                    to_keep_resolution, to_delete_resolution = vid1_resolution, vid2_resolution
-                elif len(vid1_name) > len(vid2_name):
-                    to_keep_path, to_delete_path = vid2_path, vid1_path
-                    to_keep_name, to_delete_name = vid2_name, vid1_name
-                    to_keep_preview, to_delete_preview = vid2_preview, vid1_preview
-                    to_keep_runtime, to_delete_runtime = vid2_runtime, vid1_runtime
-                    to_keep_resolution, to_delete_resolution = vid2_resolution, vid1_resolution
-                else:
-                    # Name lengths are equal, prioritize alphabetically
-                    if vid1_name < vid2_name:
-                        to_keep_path, to_delete_path = vid1_path, vid2_path
-                        to_keep_name, to_delete_name = vid1_name, vid2_name
-                        to_keep_preview, to_delete_preview = vid1_preview, vid2_preview
-                        to_keep_runtime, to_delete_runtime = vid1_runtime, vid2_runtime
-                        to_keep_resolution, to_delete_resolution = vid1_resolution, vid2_resolution
-                    else:
-                        to_keep_path, to_delete_path = vid2_path, vid1_path
-                        to_keep_name, to_delete_name = vid2_name, vid1_name
-                        to_keep_preview, to_delete_preview = vid2_preview, vid1_preview
-                        to_keep_runtime, to_delete_runtime = vid2_runtime, vid1_runtime
-                        to_keep_resolution, to_delete_resolution = vid2_resolution, vid1_resolution
 
             # Format resolution for display
             to_keep_resolution_str = f"{to_keep_resolution[0]}x{to_keep_resolution[1]}"
@@ -640,7 +568,7 @@ class ComparisonWindowVideo(QMainWindow):
             comparison_layout.addItem(space_above_separator)
 
             # Conditionally add a separator if this is not the last entry
-            if index < len(duplicates) - 1:
+            if index < len(comparison_results) - 1:
                 separator = QFrame()
                 separator.setFrameShape(QFrame.HLine)
                 separator.setFrameShadow(QFrame.Sunken)
@@ -680,21 +608,6 @@ class ComparisonWindowVideo(QMainWindow):
             return convert_frame_to_pixmap(frame_rgb)
         else:
             return QPixmap()  # Return empty pixmap if failed
-
-    def get_video_runtime(self, video_path):
-        """
-        Get the runtime (duration) of the video in HH:MM:SS format.
-        """
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-
-        total_seconds = frame_count / fps
-        hours = int(total_seconds // 3600)
-        minutes = int((total_seconds % 3600) // 60)
-        seconds = int(total_seconds % 60)
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
     
     def delete_duplicates(self):
         # Similar logic as the ComparisonWindow class
@@ -726,6 +639,143 @@ class ComparisonWindowVideo(QMainWindow):
                     print(f"Error deleting file {to_delete_path}: {e}")
 
             QMessageBox.information(self, "Deletion Complete", f"{len(files_to_delete)} files have been deleted.")
+
+class DuplicateFinderWorker(QThread):
+    progress_update = pyqtSignal(int)  # Signal to update progress bar
+    comparison_complete = pyqtSignal(list)  # Signal to emit the comparison results
+
+    def __init__(self, folder_path, search_type):
+        super().__init__()
+        self.folder_path = folder_path
+        self.search_type = search_type
+
+    def run(self):
+        # Find duplicates
+        if self.search_type == 'photo':
+            duplicates = find_duplicates(self.folder_path, self.update_finding_progress)
+        elif self.search_type == 'video':
+            duplicates = find_video_duplicates(self.folder_path, self.update_comparing_progress)
+        else:
+            duplicates = []
+
+        # If duplicates found, perform comparisons
+        if duplicates:
+            comparison_results = self.compare_duplicates(duplicates)
+            self.comparison_complete.emit(comparison_results)
+        else:
+            self.comparison_complete.emit([])
+
+    def update_progress(self, progress):
+        self.progress_update.emit(progress)
+
+    def update_finding_progress(self, progress):
+        # Adjust progress to fit within the first 50% range
+        adjusted_progress = int(progress * 0.5)  # Mapping to 0-50 range
+        self.update_progress(adjusted_progress)
+
+    def update_comparing_progress(self, progress):
+        # Adjust progress to fit within the remaining 50% range
+        adjusted_progress = 50 + int(progress * 0.5)  # Mapping to 50-100 range
+        self.update_progress(adjusted_progress)
+
+    def compare_duplicates(self, duplicates):
+        comparison_results = []
+        total_comparisons = len(duplicates)
+        
+        # Choose the comparison method based on the search type
+        if self.search_type == 'photo':
+            for index, (img1_path, img2_path, img1_hash, img2_hash) in enumerate(duplicates):
+                comparison_result = self.compare_two_images(img1_path, img2_path, img1_hash, img2_hash)
+                comparison_results.append(comparison_result)
+                self.update_comparing_progress(int((index + 1) / total_comparisons * 100))
+                # Yield to the event loop
+                QThread.msleep(1)  # Short sleep to allow UI updates
+                QApplication.processEvents()  # Process UI events to keep UI responsive
+        elif self.search_type == 'video':
+            for index, (vid1_path, vid2_path) in enumerate(duplicates):
+                comparison_result = self.compare_two_videos(vid1_path, vid2_path)
+                comparison_results.append(comparison_result)
+                self.update_comparing_progress(int((index + 1) / total_comparisons * 100))
+                # Yield to the event loop
+                QThread.msleep(1)  # Short sleep to allow UI updates
+                QApplication.processEvents()  # Process UI events to keep UI responsive
+        
+        return comparison_results
+
+    def compare_two_images(self, img1_path, img2_path, img1_hash, img2_hash):
+        img1_name = os.path.basename(img1_path)
+        img2_name = os.path.basename(img2_path)
+        img1_resolution = get_image_resolution(img1_path)[1]
+        img2_resolution = get_image_resolution(img2_path)[1]
+        img1_folder = os.path.basename(os.path.dirname(img1_path))
+        img2_folder = os.path.basename(os.path.dirname(img2_path))
+        print(f'IN COMPARE FUNCTION: Comparing {img1_name} AND {img2_name}')
+
+        if img1_resolution > img2_resolution:
+            to_keep = (img1_path, img1_name, img1_resolution, img1_folder, img1_hash)
+            to_delete = (img2_path, img2_name, img2_resolution, img2_folder, img2_hash)
+        elif img1_resolution < img2_resolution:
+            to_keep = (img2_path, img2_name, img2_resolution, img2_folder, img2_hash)
+            to_delete = (img1_path, img1_name, img1_resolution, img1_folder, img1_hash)
+        else:
+            if len(img1_name) < len(img2_name) or (len(img1_name) == len(img2_name) and img1_name < img2_name):
+                to_keep = (img1_path, img1_name, img1_resolution, img1_folder, img1_hash)
+                to_delete = (img2_path, img2_name, img2_resolution, img2_folder, img2_hash)
+            else:
+                to_keep = (img2_path, img2_name, img2_resolution, img2_folder, img2_hash)
+                to_delete = (img1_path, img1_name, img1_resolution, img1_folder, img1_hash)
+
+        return (to_keep, to_delete)
+    
+    def compare_two_videos(self, vid1_path, vid2_path):
+        vid1_name = os.path.basename(vid1_path)
+        vid2_name = os.path.basename(vid2_path)
+        vid1_resolution = get_video_resolution(vid1_path)
+        vid2_resolution = get_video_resolution(vid2_path)
+        print(f'paths: {vid1_path} 2: {vid2_path}')
+        vid1_runtime = get_video_runtime(vid1_path)
+        vid2_runtime = get_video_runtime(vid2_path)
+        vid1_folder = os.path.basename(os.path.dirname(vid1_path))
+        vid2_folder = os.path.basename(os.path.dirname(vid2_path))
+
+        print(f'IN COMPARE FUNCTION: Comparing {vid1_name} AND {vid2_name}')
+
+        # Compare based on resolution and then on runtime
+        if vid1_resolution[0] * vid1_resolution[1] > vid2_resolution[0] * vid2_resolution[1]:
+            to_keep = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
+            to_delete = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
+        elif vid1_resolution[0] * vid1_resolution[1] < vid2_resolution[0] * vid2_resolution[1]:
+            to_keep = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
+            to_delete = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
+        else:
+            # If resolutions are equal, use name length and alphabetical order
+            if len(vid1_name) < len(vid2_name) or (len(vid1_name) == len(vid2_name) and vid1_name < vid2_name):
+                to_keep = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
+                to_delete = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
+            else:
+                to_keep = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
+                to_delete = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
+
+        return (to_keep, to_delete)
+
+    def get_video_frame_preview(self, video_path):
+        """
+        Extract a frame from the middle of the video to use as a preview.
+        """
+        frame_count = get_frame_count(video_path)
+        middle_frame = frame_count // 2
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+        ret, frame = cap.read()
+        cap.release()
+
+        if ret:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return convert_frame_to_pixmap(frame_rgb)
+        else:
+            return QPixmap()  # Return empty pixmap if failed
+        
+
 
 
 
