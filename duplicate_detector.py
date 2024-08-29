@@ -67,7 +67,7 @@ def process_image(file_path, target_size=(500, 500), min_size=(256, 256)):
         print(f"Skipping {file_path}: {e}")
         return None
 
-def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500), min_size=(256, 256), hash_threshold=2):
+def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500), min_size=(256, 256), hash_threshold=1):
     """
     Find duplicate images in a given folder, ignoring resolution differences.
     Returns a list of tuples, where each tuple contains the paths of duplicate images and their pHashes.
