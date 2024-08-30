@@ -21,8 +21,8 @@ from pywinstyles import apply_style
 ## NAME: COPY CLEANER
 ## TODO: Change button color etc, find a style, for example purple.
 ## TODO: Back to main menu after deletion.
-## BUG: Hangout when having to draw large amount of photos in comparisonwindow
-## TODO: Include amount of selected photos in the delete button dynamically
+## TODO: add a progress bar to deletion, and delete in seperate thread. good for large deletions.
+## TODO: Custom error boxes and success and information boxes
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -214,7 +214,8 @@ class DuplicateImageFinder(QMainWindow):
 
     def start_processing(self):
         if not self.selected_folder:
-            QMessageBox.critical(self, "Error", "Please choose a folder before starting!")
+            error_dialog = ErrorDialog("Error", "Please select a folder that contains media files,\nor subfolders with media files to search through.")
+            error_dialog.exec_()
             return
 
         self.start_button.setVisible(False)
@@ -229,8 +230,10 @@ class DuplicateImageFinder(QMainWindow):
 
     def on_comparison_complete(self, comparison_results):
         if not comparison_results:
-            QMessageBox.information(self, "No Duplicates Found", "No duplicates were found in the selected folder.")
             self.reset_ui()
+            success_dialog = SuccessDialog('All Good!', "We've searched far and wide, but it seems that there\nare no duplicate media files in this directory. Yay!")
+            success_dialog.exec_()
+            #self.reset_ui()
             return
 
         # Prepare the comparison window based on the results
@@ -546,6 +549,10 @@ class ComparisonWindow(QMainWindow):
             comparison_layout.addWidget(separator)
 
         self.layout.addWidget(comparison_widget)
+
+        # Instead of addStretch() here, use QSpacerItem to avoid excessive space
+        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        comparison_layout.addItem(spacer)
     
     def update_delete_button_text(self):
         # Count the checked checkboxes
@@ -583,36 +590,257 @@ class ComparisonWindow(QMainWindow):
                             shred_file(to_delete_path, passes=15)
                 except Exception as e:
                     print(f"Error deleting file {to_delete_path}: {e}")
+            
+            success_delete_dialog = SuccessDialog('Deletion Complete!', f'Successfully deleted {len(files_to_delete)} duplicate media files!\nEnjoy the extra space!')
+            success_delete_dialog.exec_()
 
-            QMessageBox.information(self, "Deletion Complete", f"{len(files_to_delete)} files have been deleted.")
+            self.close()
 
 
 class DeletionConfirmationDialog(QDialog):
     def __init__(self, num_files):
         super().__init__()
         self.setWindowTitle("Confirm Deletion")
-        self.setFixedSize(300, 200)
+        self.setFixedSize(610, 330)
+        apply_style(self, "dark")
+        self.setWindowIcon(QIcon(resource_path('resources/deleteico.ico')))
+        self.setStyleSheet('background-color: #111111;')
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         layout = QVBoxLayout()
 
         # Number of files to delete
-        label = QLabel(f"Number of images marked for deletion: {num_files}")
+        label = QLabel(f"You've marked {num_files} duplicate files for deletion.\nIf this is a mistake, close this window, and you can check through\nthe duplicates again, and choose which ones are marked for deletion.")
+        label.setFont(QFont('Segoe UI', 14))
+        label.setStyleSheet('color: white;')
         layout.addWidget(label)
 
-        # Dropdown for deletion type
+        space_above_separator = QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        layout.addItem(space_above_separator)
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Plain)
+        separator.setStyleSheet("background-color: #932CC3;")  # #932CC3
+        separator.setMinimumHeight(4)
+        layout.addWidget(separator)
+
+        
+        space_above_separator = QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        layout.addItem(space_above_separator)
+
+        # Label to explain the dropdown usage
+        deletion_type_label = QLabel("Choose the deletion type for the selected duplicates:")
+        deletion_type_label.setStyleSheet('color: white;')  # Style to match the rest of your UI
+        deletion_type_label.setFont(QFont('Segoe UI', 14))
+        layout.addWidget(deletion_type_label)
+
+        # Dropdown for deletion type with improved styling
+        h_layout = QHBoxLayout()
         self.deletion_type_combo = QComboBox()
         self.deletion_type_combo.addItems(["Normal Deletion", "Shred (1 Pass)", "Shred (7 Passes) (Military Standard)", "Shred (15 Passes)"])
-        layout.addWidget(self.deletion_type_combo)
+        self.deletion_type_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #333333; /* Dark background for dropdown */
+                color: white; /* Text color for dropdown */
+                border: 1px solid #932CC3; /* Border color to match theme */
+                border-radius: 5px;
+                padding: 5px; /* Padding inside the dropdown */
+            }
+            QComboBox QAbstractItemView {
+                background-color: #333333; /* Dark background for dropdown items */
+                color: white; /* Text color for all dropdown items */
+                selection-background-color: #444444; /* Highlight color when an item is selected */
+                selection-color: white; /* Text color of the selected item */
+            }
+        """)
+        self.deletion_type_combo.setFont(QFont('Segoe UI', 14))
+        h_layout.addWidget(self.deletion_type_combo)
+
+        # Tooltip icon
+        tooltip_icon = QLabel()
+        tooltip_pixmap = QPixmap(resource_path('resources/tooltip.png')).scaled(24, 24, Qt.KeepAspectRatio)
+        tooltip_icon.setPixmap(tooltip_pixmap)
+        tooltip_icon.setToolTip("Information about different types of deletion:\n"
+                                "- Normal Deletion: Deletes the files like you would normally in Windows.\n"
+                                "- Shred (1 Pass): Overwrites the files 1 time with random data,\nbefore deleting them, making the files difficult to recover.\n"
+                                "- Shred (7 Passes): Overwrites the files 7 times with random data,\nbefore deleting them, making the files almost impossible to recover.\nThis is the military standard for deleting classified files.\n"
+                                "- Shred (15 Passes): Overwrites the files 15 times with random data,\nbefore deleting them, making the files virtually impossible recover.")
+
+        # Add the tooltip icon to the horizontal layout
+        h_layout.addWidget(tooltip_icon)
+        
+        layout.addLayout(h_layout)
+        
+        # Instead of addStretch() here, use QSpacerItem to avoid excessive space
+        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        layout.addItem(spacer)
 
         # Confirm button
-        confirm_button = QPushButton("Delete")
+        confirm_button = QPushButton("Delete Selected Duplicates")
         confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
-        layout.addWidget(confirm_button)
+        confirm_button.setStyleSheet("""
+            QPushButton {
+                background-color: #AC3AA7;
+                border: 3px solid #982FBD;
+                border-radius: 10px;
+                color: black;
+            }
+            QPushButton:hover {
+                background-color: #D45379;
+                border-color: #982FBD;
+            }
+            QPushButton:pressed {
+                background-color: #AC3AA7;
+                border-color: #982FBD;
+            }
+        """)
+        confirm_button.setFont(QFont('Calibri Bold', 16))
+        confirm_button.setFixedSize(270, 50)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(confirm_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
 
         self.setLayout(layout)
 
     def get_deletion_type(self):
         return self.deletion_type_combo.currentText()
+    
+class ErrorDialog(QDialog):
+    def __init__(self, title, text):
+        super().__init__()
+        self.setWindowTitle(title)
+        self.setFixedSize(400, 160)
+        apply_style(self, "dark")
+        self.setWindowIcon(QIcon(resource_path('resources/error.ico')))
+        self.setStyleSheet('background-color: #111111;')
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout()
+
+        # Number of files to delete
+        label = QLabel(f"{text}")
+        label.setFont(QFont('Segoe UI', 12))
+        label.setStyleSheet('color: white;')
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
+
+        space_above_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        layout.addItem(space_above_separator)
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Plain)
+        separator.setStyleSheet("background-color: #932CC3;")  # #932CC3
+        separator.setMinimumHeight(4)
+        layout.addWidget(separator)
+        layout.addStretch()
+
+
+        space_below_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        #layout.addItem(space_below_separator)
+
+        # Confirm button
+        confirm_button = QPushButton("Okay")
+        confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
+        confirm_button.setStyleSheet("""
+            QPushButton {
+                background-color: #AC3AA7;
+                border: 3px solid #982FBD;
+                border-radius: 10px;
+                color: black;
+            }
+            QPushButton:hover {
+                background-color: #D45379;
+                border-color: #982FBD;
+            }
+            QPushButton:pressed {
+                background-color: #AC3AA7;
+                border-color: #982FBD;
+            }
+        """)
+        confirm_button.setFont(QFont('Calibri Bold', 16))
+        confirm_button.setFixedSize(220, 30)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(confirm_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+        layout.addStretch()
+
+        self.setLayout(layout)
+
+class SuccessDialog(QDialog):
+    def __init__(self, title, text):
+        super().__init__()
+        self.setWindowTitle(title)
+        self.setFixedSize(400, 160)
+        apply_style(self, "dark")
+        self.setWindowIcon(QIcon(resource_path('resources/success.ico')))
+        self.setStyleSheet('background-color: #111111;')
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout()
+
+        # Number of files to delete
+        label = QLabel(f"{text}")
+        label.setFont(QFont('Segoe UI', 12))
+        label.setStyleSheet('color: white;')
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
+
+        space_above_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        layout.addItem(space_above_separator)
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Plain)
+        separator.setStyleSheet("background-color: #932CC3;")  # #932CC3
+        separator.setMinimumHeight(4)
+        layout.addWidget(separator)
+        layout.addStretch()
+
+
+        space_below_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        #layout.addItem(space_below_separator)
+
+        # Confirm button
+        confirm_button = QPushButton("Okay")
+        confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
+        confirm_button.setStyleSheet("""
+            QPushButton {
+                background-color: #AC3AA7;
+                border: 3px solid #982FBD;
+                border-radius: 10px;
+                color: black;
+            }
+            QPushButton:hover {
+                background-color: #D45379;
+                border-color: #982FBD;
+            }
+            QPushButton:pressed {
+                background-color: #AC3AA7;
+                border-color: #982FBD;
+            }
+        """)
+        confirm_button.setFont(QFont('Calibri Bold', 16))
+        confirm_button.setFixedSize(220, 30)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(confirm_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+        layout.addStretch()
+
+        self.setLayout(layout)
     
 
 def shred_file(file_path, passes=1):
@@ -637,16 +865,30 @@ class ComparisonWindowVideo(QMainWindow):
 
         self.setWindowTitle('Review Video Duplicates')
         self.setFixedSize(1000, 900)
+        self.setStyleSheet('background-color: #111111;')
+        self.setWindowIcon(QIcon(resource_path('resources/IconOnly.ico')))
+        apply_style(self, "dark")
+
+        self.button_font = QFont('Calibri Bold', 16)
 
         # Main layout for the entire window
-        main_layout = QVBoxLayout()
-
-        # Store references to checkboxes and associated paths
-        self.checkboxes = {}
+        self.main_layout = QVBoxLayout()
 
         # Titles layout
         titles_widget = QWidget()
         titles_layout = QHBoxLayout(titles_widget)
+
+        # Load icons
+        keep_icon = QPixmap('resources/keep.png').scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        delete_icon = QPixmap('resources/delete.png').scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+        to_keep_icon = QLabel()
+        to_keep_icon.setPixmap(keep_icon)
+        to_keep_icon.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        to_delete_icon = QLabel()
+        to_delete_icon.setPixmap(delete_icon)
+        to_delete_icon.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         to_keep_label = QLabel("TO KEEP")
         to_delete_label = QLabel("TO BE DELETED")
@@ -654,137 +896,271 @@ class ComparisonWindowVideo(QMainWindow):
         to_keep_label.setFont(QFont('Segoe UI', 20))
         to_delete_label.setFont(QFont('Segoe UI', 20))
 
-        to_keep_label.setAlignment(Qt.AlignCenter)
-        to_delete_label.setAlignment(Qt.AlignCenter)
+        to_keep_label.setStyleSheet('color: white;')
+        to_delete_label.setStyleSheet('color: white;')
 
+        to_keep_label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        to_delete_label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+
+        titles_layout.addWidget(to_keep_icon)
         titles_layout.addWidget(to_keep_label)
         titles_layout.addStretch()
         titles_layout.addWidget(to_delete_label)
+        titles_layout.addWidget(to_delete_icon)
 
-        main_layout.addWidget(titles_widget)
+        self.main_layout.addWidget(titles_widget)
 
         # Scroll area for viewing duplicates
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True) ##932CC3
+        self.scroll_area.setStyleSheet("""
+            QScrollBar:vertical {
+                border: none;
+                background-color: #2d2d2d;  /* Dark background color */
+                width: 10px;  /* Adjust the width of the scrollbar */
+                margin: 0px 0px 0px 0px;
+            }
+
+            QScrollBar::handle:vertical {
+                background-color: #932CC3;  /* Lighter gray for the handle */
+                min-height: 30px;  /* Minimum height for the handle */
+                border-radius: 5px;  /* Rounded corners for the handle */
+            }
+
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                background: none;  /* Remove arrows (if you want) */
+                height: 0px;  /* Set height to 0 to hide arrows */
+            }
+
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;  /* Background for pages (if you want to remove) */
+            }
+            
             QScrollArea {
-                border: 2px solid black;  /* Set border width, style, and color */
+                border: 2px solid #932CC3;                           
             }
         """)
 
         # Widget to hold all duplicate comparisons
-        container_widget = QWidget()
-        scroll_area.setWidget(container_widget)
+        self.container_widget = QWidget()
+        self.scroll_area.setWidget(self.container_widget)
 
         # Layout to arrange the duplicate comparisons vertically
-        layout = QVBoxLayout(container_widget)
+        self.layout = QVBoxLayout(self.container_widget)
 
-        # Define the maximum width for each image
-        max_image_width = 370
-        max_image_height = 500
+        self.main_layout.addWidget(self.scroll_area)
 
-        # How many dupes
-        total_duplicates = len(comparison_results)
+        # Progress bar for loading widgets
+        self.progress_bar_comp = QProgressBar(self)
+        self.progress_bar_comp.setValue(0)
+        self.progress_bar_comp.setTextVisible(True)  # Show text inside the progress bar
+        self.progress_bar_comp.setFormat("Loading Duplicates... %p%")  # Custom text format inside the progress bar
+        self.progress_bar_comp.setAlignment(Qt.AlignCenter)  # Align text to center
 
-        for index, (to_keep, to_delete) in enumerate(comparison_results):
-            # Extract precomputed data
-            to_keep_path, to_keep_name, to_keep_runtime, to_keep_resolution, to_keep_preview = to_keep
-            to_delete_path, to_delete_name, to_delete_runtime, to_delete_resolution, to_delete_preview = to_delete
+        # Style the progress bar
+        self.progress_bar_comp.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;  /* Align text to center */
+                background-color: white;
+                color: black;  /* Text color inside the progress bar */
+            }
+            QProgressBar::chunk {
+                background-color: #AA39A9;  /* Change the progress color */
+                width: 20px;
+            }
+        """)
+        self.main_layout.addWidget(self.progress_bar_comp)
 
-            comparison_widget = QWidget()
-            comparison_layout = QVBoxLayout(comparison_widget)
-            comparison_layout.setSpacing(0)
+        # Store references to checkboxes and associated paths
+        self.checkboxes = {}
+        self.comparison_results = comparison_results
+        self.current_index = 0
 
-            # Format resolution for display
-            to_keep_resolution_str = f"{to_keep_resolution[0]}x{to_keep_resolution[1]}"
-            to_delete_resolution_str = f"{to_delete_resolution[0]}x{to_delete_resolution[1]}"
-            
-            # Horizontal layout for previews and labels
-            filenames_widget = QWidget()
-            filenames_layout = QHBoxLayout(filenames_widget)
-            filenames_layout.setSpacing(10)
+        # Timer for incremental loading
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.load_next_batch)
+        self.timer.start(10)  # Adjust the interval as needed
 
-            to_keep_name_label = QLabel(f"NAME: {to_keep_name}\nDURATION: {to_keep_runtime}\nRESOLUTION: {to_keep_resolution_str}")
-            to_keep_name_label.setAlignment(Qt.AlignLeft)
-            to_keep_name_label.setStyleSheet("color: green; font-weight: bold;")
+        # Delete button, initially hidden
+        self.delete_button = QPushButton('Review Deletion', self)
+        self.delete_button.clicked.connect(self.delete_duplicates)
+        self.delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #AC3AA7;
+                border: 3px solid #982FBD;
+                border-radius: 10px;
+                color: black;
+            }
+            QPushButton:hover {
+                background-color: #D45379;
+                border-color: #982FBD;
+            }
+            QPushButton:pressed {
+                background-color: #AC3AA7;
+                border-color: #982FBD;
+            }
+        """)
+        self.delete_button.setFixedSize(240,45)
+        self.delete_button.setFont(self.button_font)
+        self.delete_button.hide()  # Start hidden
 
-            to_delete_name_label = QLabel(f"NAME: {to_delete_name}\nDURATION: {to_delete_runtime}\nRESOLUTION: {to_delete_resolution_str}")
-            to_delete_name_label.setAlignment(Qt.AlignRight)
-            to_delete_name_label.setStyleSheet("color: red; font-weight: bold;")
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()  # Add stretchable space to the left
+        button_layout.addWidget(self.delete_button)
+        button_layout.addStretch()  # Add stretchable space to the right
 
-            filenames_layout.addWidget(to_keep_name_label)
-            filenames_layout.addStretch()
-            filenames_layout.addWidget(to_delete_name_label)
+        self.main_layout.addLayout(button_layout)
 
-            comparison_layout.addWidget(filenames_widget)
+        # Initialize the batch size
+        self.batch_size = 8  # Number of items to load per batch
 
-            #Horizontal Layout for images
-            images_widget = QWidget()
-            images_layout = QHBoxLayout(images_widget)
-            images_layout.setSpacing(10)
-            
-            to_keep_label = QLabel()
-            to_keep_pixmap = QPixmap(to_keep_preview)
-            to_keep_label.setPixmap(to_keep_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
+        central_widget = QWidget()
+        central_widget.setLayout(self.main_layout)
+        self.setCentralWidget(central_widget)
 
-            to_delete_label = QLabel()
-            to_delete_pixmap = QPixmap(to_delete_preview)
-            to_delete_label.setPixmap(to_delete_pixmap.scaled(max_image_width, max_image_height, Qt.KeepAspectRatio))
+    def load_next_batch(self):
+        """Load the next batch of comparison widgets."""
+        for _ in range(self.batch_size):
+            if self.current_index >= len(self.comparison_results):
+                self.timer.stop()
+                # Hide progress bar and show delete button when done
+                self.progress_bar_comp.hide()
+                self.update_delete_button_text()
+                self.delete_button.show()
+                return
 
-            images_layout.addStretch()
-            images_layout.addWidget(to_keep_label)
-            images_layout.addStretch()
-            images_layout.addWidget(to_delete_label)
-            images_layout.addStretch()
+            to_keep, to_delete = self.comparison_results[self.current_index]
+            self.create_comparison_widget(to_keep, to_delete)
+            self.current_index += 1
 
-            comparison_layout.addWidget(images_widget)
+            # Update progress bar
+            self.progress_bar_comp.setValue(int((self.current_index / len(self.comparison_results)) * 100))
 
-            # Add space above checkbox
-            space_above_checkbox = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
-            comparison_layout.addItem(space_above_checkbox)
+    def create_comparison_widget(self, to_keep, to_delete):
+        """Create and add widgets based on the provided data."""
+        to_keep_path, to_keep_name, to_keep_runtime, to_keep_resolution, to_keep_preview, to_keep_folder = to_keep
+        to_delete_path, to_delete_name, to_delete_runtime, to_delete_resolution, to_delete_preview, to_delete_folder = to_delete
 
-            # Add a checkbox below the videos to decide deletion
-            checkbox_layout = QHBoxLayout()
-            checkbox_layout.addStretch()
+        # Truncate names if too long
+        to_keep_name = truncate_name(to_keep_name)
+        to_delete_name = truncate_name(to_delete_name)
 
-            delete_checkbox = QCheckBox("Mark for deletion")
-            delete_checkbox.setChecked(True)  # Default to checked
-            checkbox_layout.addWidget(delete_checkbox)
+        comparison_widget = QWidget()
+        comparison_layout = QVBoxLayout(comparison_widget)
+        comparison_layout.setSpacing(0)
 
-            checkbox_layout.addStretch()
-            comparison_layout.addLayout(checkbox_layout)
+        to_keep_resolution_str = f"{to_keep_resolution[0]}x{to_keep_resolution[1]}"
+        to_delete_resolution_str = f"{to_delete_resolution[0]}x{to_delete_resolution[1]}"
 
-            # Store the checkbox and the paths in the dictionary
-            self.checkboxes[delete_checkbox] = (to_keep_path, to_delete_path) # MAKE RESOLUTION COMPARISON TO "to_keep_path" variable
+        # Horizontal layout for filenames and resolutions
+        filenames_widget = QWidget()
+        filenames_layout = QHBoxLayout(filenames_widget)
+        filenames_layout.setSpacing(10)
 
-            # Add space between the images and the separator
-            space_above_separator = QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Fixed)
-            comparison_layout.addItem(space_above_separator)
+        to_keep_name_label = QLabel(f"NAME: {to_keep_name}\nDURATION: {to_keep_runtime}\nRESOLUTION: {to_keep_resolution_str}\nLOCATION: {to_keep_folder}")
+        to_keep_name_label.setAlignment(Qt.AlignLeft)
+        to_keep_name_label.setFont(QFont('Segoe UI', 10))
+        to_keep_name_label.setStyleSheet("color: green; font-weight: bold;")
 
-            # Conditionally add a separator if this is not the last entry
-            if index < len(comparison_results) - 1:
-                separator = QFrame()
-                separator.setFrameShape(QFrame.HLine)
-                separator.setFrameShadow(QFrame.Sunken)
-                separator.setStyleSheet("background-color: black; height: 4px;")
-                comparison_layout.addWidget(separator)
+        to_delete_name_label = QLabel(f"NAME: {to_delete_name}\nDURATION: {to_delete_runtime}\nRESOLUTION: {to_delete_resolution_str}\nLOCATION: {to_delete_folder}")
+        to_delete_name_label.setAlignment(Qt.AlignRight)
+        to_delete_name_label.setFont(QFont('Segoe UI', 10))
+        to_delete_name_label.setStyleSheet("color: red; font-weight: bold;")
 
-            layout.addWidget(comparison_widget)
+        filenames_layout.addWidget(to_keep_name_label)
+        filenames_layout.addStretch()
+        filenames_layout.addWidget(to_delete_name_label)
+
+        comparison_layout.addWidget(filenames_widget)
+
+        # Horizontal layout for images
+        images_widget = QWidget()
+        images_layout = QHBoxLayout(images_widget)
+        images_layout.setSpacing(10)
+
+        to_keep_label = QLabel()
+        to_keep_pixmap = QPixmap(to_keep_preview)
+        to_keep_label.setPixmap(to_keep_pixmap.scaled(370, 500, Qt.KeepAspectRatio))
+
+        to_delete_label = QLabel()
+        to_delete_pixmap = QPixmap(to_delete_preview)
+        to_delete_label.setPixmap(to_delete_pixmap.scaled(370, 500, Qt.KeepAspectRatio))
+
+        images_layout.addStretch()
+        images_layout.addWidget(to_keep_label)
+        images_layout.addStretch()
+        images_layout.addWidget(to_delete_label)
+        images_layout.addStretch()
+
+        comparison_layout.addWidget(images_widget)
+
+        # Add space above checkbox
+        space_above_checkbox = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        comparison_layout.addItem(space_above_checkbox)
+
+        # Add a checkbox below the images to decide deletion
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.addStretch()
+
+        delete_checkbox = QCheckBox("Mark For Deletion")
+        delete_checkbox.setStyleSheet('color: white;')
+        delete_checkbox.setFont(QFont('Segoe UI', 14))
+        delete_checkbox.setChecked(True)
+        delete_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: white;
+                font-size: 14pt; /* Font size */
+            }
+            QCheckBox::indicator {
+                width: 18px; /* Width of the checkbox */
+                height: 18px; /* Height of the checkbox */
+            }
+            QCheckBox::indicator:checked {
+                background-color: #932CC3; /* Custom color for checked state */
+                border: 2px solid white; /* Border color and size */
+            }
+            QCheckBox::indicator:unchecked {
+                background-color: #333333; /* Custom color for unchecked state */
+                border: 2px solid white; /* Border color and size */
+            }
+        """)
+
+        # Connect state change signal to update function
+        delete_checkbox.stateChanged.connect(self.update_delete_button_text)
+
+        checkbox_layout.addWidget(delete_checkbox)
+
+        checkbox_layout.addStretch()
+        comparison_layout.addLayout(checkbox_layout)
+
+        self.checkboxes[delete_checkbox] = (to_keep_path, to_delete_path)
+
+        # Add space between the images and the separator
+        space_above_separator = QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        comparison_layout.addItem(space_above_separator)
+
+        # Separator
+        if self.current_index < len(self.comparison_results) - 1:
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setFrameShadow(QFrame.Plain)
+            separator.setStyleSheet("background-color: #932CC3;") ##932CC3
+            separator.setMinimumHeight(4)
+            comparison_layout.addWidget(separator)
+
+        self.layout.addWidget(comparison_widget)
 
         # Instead of addStretch() here, use QSpacerItem to avoid excessive space
         spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
         comparison_layout.addItem(spacer)
-
-        main_layout.addWidget(scroll_area)
-
-        # Delete button at the bottom
-        delete_button = QPushButton('Delete Duplicates', self)
-        delete_button.clicked.connect(self.delete_duplicates)
-        main_layout.addWidget(delete_button)
-
-        central_widget = QWidget()
-        central_widget.setLayout(main_layout)
-        self.setCentralWidget(central_widget)
+    
+    def update_delete_button_text(self):
+        # Count the checked checkboxes
+        marked_for_deletion = sum(checkbox.isChecked() for checkbox in self.checkboxes)
+        # Update the button text
+        self.delete_button.setText(f'Review Deletion ({marked_for_deletion})')
 
     def get_video_frame_preview(self, video_path):
         """
@@ -825,14 +1201,16 @@ class ComparisonWindowVideo(QMainWindow):
                     elif "Shred" in deletion_type:
                         if "1 Pass" in deletion_type:
                             shred_file(to_delete_path, passes=1)
-                        elif "3 Passes" in deletion_type:
-                            shred_file(to_delete_path, passes=3)
                         elif "7 Passes" in deletion_type:
                             shred_file(to_delete_path, passes=7)
+                        elif "15 Passes" in deletion_type:
+                            shred_file(to_delete_path, passes=15)
                 except Exception as e:
                     print(f"Error deleting file {to_delete_path}: {e}")
 
             QMessageBox.information(self, "Deletion Complete", f"{len(files_to_delete)} files have been deleted.")
+
+            self.close()
 
 class DuplicateFinderWorker(QThread):
     progress_update = pyqtSignal(int)  # Signal to update progress bar
@@ -848,7 +1226,7 @@ class DuplicateFinderWorker(QThread):
         if self.search_type == 'photo':
             duplicates = find_duplicates(self.folder_path, self.update_finding_progress)
         elif self.search_type == 'video':
-            duplicates = find_video_duplicates(self.folder_path, self.update_comparing_progress)
+            duplicates = find_video_duplicates(self.folder_path, self.update_finding_progress)
         else:
             duplicates = []
 
@@ -936,19 +1314,19 @@ class DuplicateFinderWorker(QThread):
 
         # Compare based on resolution and then on runtime
         if vid1_resolution[0] * vid1_resolution[1] > vid2_resolution[0] * vid2_resolution[1]:
-            to_keep = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
-            to_delete = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
+            to_keep = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path), vid1_folder)
+            to_delete = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path), vid2_folder)
         elif vid1_resolution[0] * vid1_resolution[1] < vid2_resolution[0] * vid2_resolution[1]:
-            to_keep = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
-            to_delete = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
+            to_keep = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path), vid2_folder)
+            to_delete = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path), vid1_folder)
         else:
             # If resolutions are equal, use name length and alphabetical order
             if len(vid1_name) < len(vid2_name) or (len(vid1_name) == len(vid2_name) and vid1_name < vid2_name):
-                to_keep = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
-                to_delete = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
+                to_keep = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path), vid1_folder)
+                to_delete = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path), vid2_folder)
             else:
-                to_keep = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path))
-                to_delete = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path))
+                to_keep = (vid2_path, vid2_name, vid2_runtime, vid2_resolution, self.get_video_frame_preview(vid2_path), vid2_folder)
+                to_delete = (vid1_path, vid1_name, vid1_runtime, vid1_resolution, self.get_video_frame_preview(vid1_path), vid1_folder)
 
         return (to_keep, to_delete)
 
