@@ -11,18 +11,14 @@ import cv2
 from PIL import Image
 import numpy as np
 from pywinstyles import apply_style
-
+from time import sleep
 
 ## TODO: ICONS next to important stuff
 ## TODO: FONTS
 ## TODO: DISPLAY IMAGE SIZE
 ## TODO: Ui work, progress bar/dynamic loading icons
 ## BUG: Not correct deletion when theres 3 duplicates in varying sizes. - might be fix, test 3 images in differing res
-## NAME: COPY CLEANER
 ## TODO: Change button color etc, find a style, for example purple.
-## TODO: Back to main menu after deletion.
-## TODO: add a progress bar to deletion, and delete in seperate thread. good for large deletions.
-## TODO: Custom error boxes and success and information boxes
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -270,6 +266,8 @@ class ComparisonWindow(QMainWindow):
         self.setWindowIcon(QIcon(resource_path('resources/IconOnly.ico')))
         apply_style(self, "dark")
 
+        self.default_pixmap = QPixmap(resource_path('resources/nopreview.png'))
+
         self.button_font = QFont('Calibri Bold', 16)
 
         # Main layout for the entire window
@@ -374,6 +372,30 @@ class ComparisonWindow(QMainWindow):
         """)
         self.main_layout.addWidget(self.progress_bar)
 
+        # Progress bar for deleting
+        self.delete_progress_bar = QProgressBar(self)
+        self.delete_progress_bar.setValue(0)
+        self.delete_progress_bar.setTextVisible(True)  # Show text inside the progress bar
+        self.delete_progress_bar.setFormat("Deleting Duplicates... %p%")  # Custom text format inside the progress bar
+        self.delete_progress_bar.setAlignment(Qt.AlignCenter)  # Align text to center
+        self.delete_progress_bar.hide()
+
+        # Style the progress bar
+        self.delete_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;  /* Align text to center */
+                background-color: white;
+                color: black;  /* Text color inside the progress bar */
+            }
+            QProgressBar::chunk {
+                background-color: #AA39A9;  /* Change the progress color */
+                width: 20px;
+            }
+        """)
+        self.main_layout.addWidget(self.delete_progress_bar)
+
         # Store references to checkboxes and associated paths
         self.checkboxes = {}
         self.comparison_results = comparison_results
@@ -386,7 +408,7 @@ class ComparisonWindow(QMainWindow):
 
         # Delete button, initially hidden
         self.delete_button = QPushButton('Review Deletion', self)
-        self.delete_button.clicked.connect(self.delete_duplicates)
+        self.delete_button.clicked.connect(self.show_deletion_dialog)
         self.delete_button.setStyleSheet("""
             QPushButton {
                 background-color: #AC3AA7;
@@ -480,11 +502,17 @@ class ComparisonWindow(QMainWindow):
 
         to_keep_label = QLabel()
         to_keep_pixmap = QPixmap(to_keep_path)
+        if to_keep_pixmap.isNull():
+            to_keep_pixmap = self.default_pixmap.scaled(370,500,Qt.KeepAspectRatio)
         to_keep_label.setPixmap(to_keep_pixmap.scaled(370, 500, Qt.KeepAspectRatio))
+
 
         to_delete_label = QLabel()
         to_delete_pixmap = QPixmap(to_delete_path)
+        if to_delete_pixmap.isNull():
+            to_delete_pixmap = self.default_pixmap.scaled(370,500,Qt.KeepAspectRatio)
         to_delete_label.setPixmap(to_delete_pixmap.scaled(370, 500, Qt.KeepAspectRatio))
+
 
         images_layout.addStretch()
         images_layout.addWidget(to_keep_label)
@@ -560,41 +588,34 @@ class ComparisonWindow(QMainWindow):
         # Update the button text
         self.delete_button.setText(f'Review Deletion ({marked_for_deletion})')
 
-    def delete_duplicates(self):
-        # Count files marked for deletion
-        files_to_delete = [(to_delete_path, to_keep_path) for checkbox, (to_keep_path, to_delete_path) in self.checkboxes.items() if checkbox.isChecked()]
-
-        if not files_to_delete:
-            QMessageBox.information(self, "No Files Selected", "No files are marked for deletion.")
+    def show_deletion_dialog(self):
+        num_files = len([checkbox for checkbox in self.checkboxes if checkbox.isChecked()])
+        if num_files == 0:
+            error_dialog = ErrorDialog('Error', 'Whoops!\nSeems like you forgot to mark any files for deletion.')
+            error_dialog.exec_()
             return
-
-        # Show deletion confirmation dialog
-        dialog = DeletionConfirmationDialog(len(files_to_delete))
+        
+        dialog = DeletionConfirmationDialog(num_files)
         if dialog.exec_() == QDialog.Accepted:
+            self.delete_progress_bar.setVisible(True)
+            self.delete_button.setVisible(False)
             deletion_type = dialog.get_deletion_type()
+            self.start_deletion(deletion_type)
 
-            for to_delete_path, to_keep_path in files_to_delete:
-                # Log which files are being kept and deleted
-                print(f"Keeping {to_keep_path}, Deleting {to_delete_path}")
+    def start_deletion(self, deletion_type):
+        self.deletion_worker = DeletionWorker(self.checkboxes, deletion_type)
+        self.deletion_worker.progress_update.connect(self.update_progress_bar)
+        self.deletion_worker.deletion_complete.connect(self.on_deletion_complete)
+        self.deletion_worker.start()
 
-                try:
-                    if deletion_type == "Normal Deletion":
-                        os.remove(to_delete_path)
-                        print(f"File deleted: {to_delete_path}")
-                    elif "Shred" in deletion_type:
-                        if "1 Pass" in deletion_type:
-                            shred_file(to_delete_path, passes=1)
-                        elif "7 Passes" in deletion_type:
-                            shred_file(to_delete_path, passes=7)
-                        elif "15 Passes" in deletion_type:
-                            shred_file(to_delete_path, passes=15)
-                except Exception as e:
-                    print(f"Error deleting file {to_delete_path}: {e}")
-            
-            success_delete_dialog = SuccessDialog('Deletion Complete!', f'Successfully deleted {len(files_to_delete)} duplicate media files!\nEnjoy the extra space!')
-            success_delete_dialog.exec_()
+    def update_progress_bar(self, value):
+        self.delete_progress_bar.setValue(value)
 
-            self.close()
+    def on_deletion_complete(self):
+        self.delete_progress_bar.setVisible(False)
+        success_delete_dialog = SuccessDialog('Deletion Complete!', f'Woohoo!\nSuccessfully deleted the marked duplicates!')
+        success_delete_dialog.exec_()
+        self.close()
 
 
 class DeletionConfirmationDialog(QDialog):
@@ -655,16 +676,18 @@ class DeletionConfirmationDialog(QDialog):
             }
         """)
         self.deletion_type_combo.setFont(QFont('Segoe UI', 14))
+        # Set the dropdown to expand
+        self.deletion_type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         h_layout.addWidget(self.deletion_type_combo)
 
         # Tooltip icon
         tooltip_icon = QLabel()
-        tooltip_pixmap = QPixmap(resource_path('resources/tooltip.png')).scaled(24, 24, Qt.KeepAspectRatio)
+        tooltip_pixmap = QPixmap(resource_path('resources/tooltip.png')).scaled(30, 30, Qt.KeepAspectRatio)
         tooltip_icon.setPixmap(tooltip_pixmap)
-        tooltip_icon.setToolTip("Information about different types of deletion:\n"
-                                "- Normal Deletion: Deletes the files like you would normally in Windows.\n"
-                                "- Shred (1 Pass): Overwrites the files 1 time with random data,\nbefore deleting them, making the files difficult to recover.\n"
-                                "- Shred (7 Passes): Overwrites the files 7 times with random data,\nbefore deleting them, making the files almost impossible to recover.\nThis is the military standard for deleting classified files.\n"
+        tooltip_icon.setToolTip("Information about different types of deletion:\n\n"
+                                "- Normal Deletion: Deletes the files like you would normally in Windows.\n\n"
+                                "- Shred (1 Pass): Overwrites the files 1 time with random data,\nbefore deleting them, making the files difficult to recover.\n\n"
+                                "- Shred (7 Passes): Overwrites the files 7 times with random data,\nbefore deleting them, making the files almost impossible to recover.\nThis is the military standard for deleting classified files.\n\n"
                                 "- Shred (15 Passes): Overwrites the files 15 times with random data,\nbefore deleting them, making the files virtually impossible recover.")
 
         # Add the tooltip icon to the horizontal layout
@@ -704,6 +727,7 @@ class DeletionConfirmationDialog(QDialog):
         button_layout.addStretch()
 
         layout.addLayout(button_layout)
+
 
         self.setLayout(layout)
 
@@ -841,22 +865,6 @@ class SuccessDialog(QDialog):
         layout.addStretch()
 
         self.setLayout(layout)
-    
-
-def shred_file(file_path, passes=1):
-    """
-    Shred a file by overwriting it with random data for a specified number of passes.
-    """
-    try:
-        with open(file_path, "r+b") as f:
-            length = os.path.getsize(file_path)
-            for _ in range(passes):
-                f.seek(0)
-                f.write(bytearray(random.getrandbits(8) for _ in range(length)))
-        os.remove(file_path)
-        print(f"File shredded: {file_path}")
-    except Exception as e:
-        print(f"Error shredding file {file_path}: {e}")
 
 
 class ComparisonWindowVideo(QMainWindow):
@@ -868,6 +876,8 @@ class ComparisonWindowVideo(QMainWindow):
         self.setStyleSheet('background-color: #111111;')
         self.setWindowIcon(QIcon(resource_path('resources/IconOnly.ico')))
         apply_style(self, "dark")
+
+        self.default_pixmap = QPixmap(resource_path('resources/nopreview.png'))
 
         self.button_font = QFont('Calibri Bold', 16)
 
@@ -973,6 +983,31 @@ class ComparisonWindowVideo(QMainWindow):
         """)
         self.main_layout.addWidget(self.progress_bar_comp)
 
+
+        # Progress bar for deleting
+        self.delete_progress_bar = QProgressBar(self)
+        self.delete_progress_bar.setValue(0)
+        self.delete_progress_bar.setTextVisible(True)  # Show text inside the progress bar
+        self.delete_progress_bar.setFormat("Deleting Duplicates... %p%")  # Custom text format inside the progress bar
+        self.delete_progress_bar.setAlignment(Qt.AlignCenter)  # Align text to center
+        self.delete_progress_bar.hide()
+
+        # Style the progress bar
+        self.delete_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;  /* Align text to center */
+                background-color: white;
+                color: black;  /* Text color inside the progress bar */
+            }
+            QProgressBar::chunk {
+                background-color: #AA39A9;  /* Change the progress color */
+                width: 20px;
+            }
+        """)
+        self.main_layout.addWidget(self.delete_progress_bar)
+
         # Store references to checkboxes and associated paths
         self.checkboxes = {}
         self.comparison_results = comparison_results
@@ -985,7 +1020,7 @@ class ComparisonWindowVideo(QMainWindow):
 
         # Delete button, initially hidden
         self.delete_button = QPushButton('Review Deletion', self)
-        self.delete_button.clicked.connect(self.delete_duplicates)
+        self.delete_button.clicked.connect(self.show_deletion_dialog)
         self.delete_button.setStyleSheet("""
             QPushButton {
                 background-color: #AC3AA7;
@@ -1082,10 +1117,14 @@ class ComparisonWindowVideo(QMainWindow):
 
         to_keep_label = QLabel()
         to_keep_pixmap = QPixmap(to_keep_preview)
+        if to_keep_pixmap.isNull():
+            to_keep_pixmap = self.default_pixmap.scaled(370,500,Qt.KeepAspectRatio)
         to_keep_label.setPixmap(to_keep_pixmap.scaled(370, 500, Qt.KeepAspectRatio))
 
         to_delete_label = QLabel()
         to_delete_pixmap = QPixmap(to_delete_preview)
+        if to_delete_pixmap.isNull():
+            to_delete_pixmap = self.default_pixmap.scaled(370,500,Qt.KeepAspectRatio)
         to_delete_label.setPixmap(to_delete_pixmap.scaled(370, 500, Qt.KeepAspectRatio))
 
         images_layout.addStretch()
@@ -1178,39 +1217,36 @@ class ComparisonWindowVideo(QMainWindow):
             return convert_frame_to_pixmap(frame_rgb)
         else:
             return QPixmap()  # Return empty pixmap if failed
-    
-    def delete_duplicates(self):
-        # Similar logic as the ComparisonWindow class
-        files_to_delete = [to_delete_path for checkbox, (to_keep_path, to_delete_path) in self.checkboxes.items() if checkbox.isChecked()]
 
-        if not files_to_delete:
-            QMessageBox.information(self, "No Files Selected", "Please mark files for deletion.")
+
+    def show_deletion_dialog(self):
+        num_files = len([checkbox for checkbox in self.checkboxes if checkbox.isChecked()])
+        if num_files == 0:
+            error_dialog = ErrorDialog('Error', 'Whoops!\nSeems like you forgot to mark any files for deletion.')
+            error_dialog.exec_()
             return
-
-        # Show deletion confirmation dialog
-        dialog = DeletionConfirmationDialog(len(files_to_delete))
+        
+        dialog = DeletionConfirmationDialog(num_files)
         if dialog.exec_() == QDialog.Accepted:
+            self.delete_progress_bar.setVisible(True)
+            self.delete_button.setVisible(False)
             deletion_type = dialog.get_deletion_type()
+            self.start_deletion(deletion_type)
 
-            for to_delete_path in files_to_delete:
-                print(f"Deleting {to_delete_path}")
-                try:
-                    if deletion_type == "Normal Deletion":
-                        os.remove(to_delete_path)
-                        print(f"File deleted: {to_delete_path}")
-                    elif "Shred" in deletion_type:
-                        if "1 Pass" in deletion_type:
-                            shred_file(to_delete_path, passes=1)
-                        elif "7 Passes" in deletion_type:
-                            shred_file(to_delete_path, passes=7)
-                        elif "15 Passes" in deletion_type:
-                            shred_file(to_delete_path, passes=15)
-                except Exception as e:
-                    print(f"Error deleting file {to_delete_path}: {e}")
+    def start_deletion(self, deletion_type):
+        self.deletion_worker = DeletionWorker(self.checkboxes, deletion_type)
+        self.deletion_worker.progress_update.connect(self.update_progress_bar)
+        self.deletion_worker.deletion_complete.connect(self.on_deletion_complete)
+        self.deletion_worker.start()
 
-            QMessageBox.information(self, "Deletion Complete", f"{len(files_to_delete)} files have been deleted.")
+    def update_progress_bar(self, value):
+        self.delete_progress_bar.setValue(value)
 
-            self.close()
+    def on_deletion_complete(self):
+        self.delete_progress_bar.setVisible(False)
+        success_delete_dialog = SuccessDialog('Deletion Complete!', f'Woohoo!\nSuccessfully deleted the marked duplicates!')
+        success_delete_dialog.exec_()
+        self.close()
 
 class DuplicateFinderWorker(QThread):
     progress_update = pyqtSignal(int)  # Signal to update progress bar
@@ -1347,9 +1383,53 @@ class DuplicateFinderWorker(QThread):
         else:
             return QPixmap()  # Return empty pixmap if failed
         
+def shred_file(file_path, passes=1):
+    """
+    Shred a file by overwriting it with random data for a specified number of passes.
+    """
+    try:
+        with open(file_path, "r+b") as f:
+            length = os.path.getsize(file_path)
+            for _ in range(passes):
+                f.seek(0)
+                f.write(bytearray(random.getrandbits(8) for _ in range(length)))
+        os.remove(file_path)
+        print(f"File shredded: {file_path}")
+    except Exception as e:
+        print(f"Error shredding file {file_path}: {e}")
 
+class DeletionWorker(QThread):
+    progress_update = pyqtSignal(int)
+    deletion_complete = pyqtSignal()
 
+    def __init__(self, checkboxes, deletion_type):
+        super().__init__()
+        self.checkboxes = checkboxes
+        self.deletion_type = deletion_type
 
+    def run(self):
+        total_files = len([checkbox for checkbox in self.checkboxes if checkbox.isChecked()])
+        deleted_count = 0
+
+        for checkbox, (to_keep_path, to_delete_path) in self.checkboxes.items():
+            if checkbox.isChecked():
+                try:
+                    if self.deletion_type == "Normal Deletion":
+                        os.remove(to_delete_path)
+                    elif "Shred" in self.deletion_type:
+                        if "1 Pass" in self.deletion_type:
+                            shred_file(to_delete_path, passes=1)
+                        elif "7 Passes" in self.deletion_type:
+                            shred_file(to_delete_path, passes=7)
+                        elif "15 Passes" in self.deletion_type:
+                            shred_file(to_delete_path, passes=15)
+                except Exception as e:
+                    print(f"Error deleting file {to_delete_path}: {e}")
+                deleted_count += 1
+                self.progress_update.emit(int((deleted_count / total_files) * 100))
+
+        self.deletion_complete.emit()
+        
 
 def main():
     app = QApplication(sys.argv)

@@ -1,6 +1,7 @@
 import os
 import hashlib
 from PIL import Image
+import pillow_avif
 import imagehash
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import cv2
