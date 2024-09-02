@@ -17,7 +17,7 @@ You can easily review duplicates side-by-side with visual previews (inspired by 
 
 - **Intuitive User Interface**: With a dark and minimalistic UI, the app is easy and pleasant to use. Unlike many other apps with this functionality, this app presents a visual representation of the duplicates found, so that you can compare them and choose which ones you wanna delete.
 
-- **No Duplicates Left Unsearched**: Copy Cleaner will search all files in your chosen directory, also those inside subfolders. It will even detect duplicates across folders different folders.
+- **No Duplicates Left Unsearched**: Copy Cleaner will search all files in your chosen directory, also those inside subfolders. It will even detect duplicates across different folders.
 
 - **Privacy Above All**: Given the sensitive nature of your personal image and video files, this app was created with utmost privacy in mind.
     - No outbound or inbound internet connections are made. 
