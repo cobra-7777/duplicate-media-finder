@@ -26,11 +26,16 @@ You can easily review duplicates side-by-side with visual previews (inspired by 
     - Open source and free - you're free to check the code.
 
 
-## Usage
+## Installation
 
 Simply download the latest release on the right hand side menu of this Github page, where it says "Releases". Extract the archive, and run the EXE file, and you're ready to go!
 
-If you wish to run the code on your own, you are free to clone it and make your own EXE, or run it directly from your IDE or terminal. I will not be helping anyone do this. If you dont know how, use the EXE i am providing. 
+If you wish to run the code on your own, you are free to clone it and make your own EXE, or run it directly from your IDE or terminal. I will not be helping anyone do this. If you dont know how, use the EXE i am providing.
+
+## Usage
+
+- Select a folder containing your media files, choose whether to search for image or video duplicates, and let the app do the rest. 
+- Review the detected duplicates, make your selection, and choose your preferred deletion method.
     
 ## Screenshots
 
