@@ -1,4 +1,6 @@
 
+[![Full-Logo-Transparent-No-Buffer.png](https://i.postimg.cc/VNsRb7K6/Full-Logo-Transparent-No-Buffer.png)](https://i.postimg.cc/jSDjnPss/IconOnly.png)
+
 # Copy Cleaner - Easy media deduplication
 
 Copy Cleaner is a robust desktop application designed to help you efficiently locate and manage duplicate images and videos on your systems. With an intuitive graphical user interface (GUI) built using PyQt, this tool leverages advanced algorithms for identifying duplicates based on perceptual hashing, file resolution, and file properties. 
