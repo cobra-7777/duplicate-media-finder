@@ -1,5 +1,9 @@
 
-[![IconOnly.png](https://i.postimg.cc/gkJz18Lv/IconOnly.png)](https://postimg.cc/Cd3pqZN1)
+<p align="center">
+  <a href="https://postimg.cc/Cd3pqZN1">
+    <img src="https://i.postimg.cc/gkJz18Lv/IconOnly.png" alt="IconOnly.png" />
+  </a>
+</p>
 
 # Copy Cleaner - Easy media deduplication
 
