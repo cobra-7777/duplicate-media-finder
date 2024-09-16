@@ -6,12 +6,10 @@ from PyQt5.QtGui import QPixmap, QFont, QImage, QIcon
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates, get_video_resolution, get_video_runtime  # Import the duplicate detection module
 import os
-import random
-import cv2
-from PIL import Image
-import numpy as np
+from random import getrandbits
+from cv2 import VideoCapture, cvtColor, COLOR_BGR2RGB, CAP_PROP_POS_FRAMES
 from pywinstyles import apply_style
-from time import sleep
+import logging_wrapper
 
 ## TODO: ICONS next to important stuff
 ## TODO: FONTS
@@ -19,6 +17,9 @@ from time import sleep
 ## TODO: Ui work, progress bar/dynamic loading icons
 ## BUG: Not correct deletion when theres 3 duplicates in varying sizes. - might be fix, test 3 images in differing res
 ## TODO: Change button color etc, find a style, for example purple.
+
+# Setup the logger
+logging_wrapper.setup_logger()
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -57,6 +58,7 @@ class DuplicateImageFinder(QMainWindow):
 
         self.button_font = QFont('Calibri Bold', 16)
         self.text_font = QFont('Segoe UI', 11)
+        logging_wrapper.log_info('Drawing the main UI...')
 
         # Logo
         self.logo_label = QLabel(self)
@@ -95,7 +97,7 @@ class DuplicateImageFinder(QMainWindow):
 
         # Icon QLabel
         icon_label = QLabel(self)
-        folder_icon = QPixmap('resources/folder.png').scaled(25, 25, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        folder_icon = QPixmap(resource_path('resources/folder.png')).scaled(25, 25, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         icon_label.setPixmap(folder_icon)
 
         # Text QLabel
@@ -207,11 +209,13 @@ class DuplicateImageFinder(QMainWindow):
         if folder:
             self.selected_folder = folder
             self.folder_label.setText(f'Selected Folder: {folder}')
+            logging_wrapper.log_info(f"Folder: '{folder}' was selected.")
 
     def start_processing(self):
         if not self.selected_folder:
             error_dialog = ErrorDialog("Error", "Please select a folder that contains media files,\nor subfolders with media files to search through.")
             error_dialog.exec_()
+            logging_wrapper.log_error("A folder with no media files was chosen.")
             return
 
         self.start_button.setVisible(False)
@@ -229,6 +233,7 @@ class DuplicateImageFinder(QMainWindow):
             self.reset_ui()
             success_dialog = SuccessDialog('All Good!', "We've searched far and wide, but it seems that there\nare no duplicate media files in this directory. Yay!")
             success_dialog.exec_()
+            logging_wrapper.log_info('Processing returned no duplicates found.')
             #self.reset_ui()
             return
 
@@ -249,10 +254,12 @@ class DuplicateImageFinder(QMainWindow):
 
     def show_comparison_window(self, comparison_results):
         self.comparison_window = ComparisonWindow(comparison_results)
+        logging_wrapper.log_info("Drawing comparison window...")
         self.comparison_window.show()
 
     def show_comparison_window_videos(self, video_comparison_results):
         self.comparison_window_videos = ComparisonWindowVideo(video_comparison_results)
+        logging_wrapper.log_info("Drawing comparison video window...")
         self.comparison_window_videos.show()
 
 
@@ -278,8 +285,8 @@ class ComparisonWindow(QMainWindow):
         titles_layout = QHBoxLayout(titles_widget)
 
         # Load icons
-        keep_icon = QPixmap('resources/keep.png').scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        delete_icon = QPixmap('resources/delete.png').scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        keep_icon = QPixmap(resource_path('resources/keep.png')).scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        delete_icon = QPixmap(resource_path('resources/delete.png')).scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
         to_keep_icon = QLabel()
         to_keep_icon.setPixmap(keep_icon)
@@ -1207,13 +1214,13 @@ class ComparisonWindowVideo(QMainWindow):
         """
         frame_count = get_frame_count(video_path)
         middle_frame = frame_count // 2
-        cap = cv2.VideoCapture(video_path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+        cap = VideoCapture(video_path)
+        cap.set(CAP_PROP_POS_FRAMES, middle_frame)
         ret, frame = cap.read()
         cap.release()
 
         if ret:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_rgb = cvtColor(frame, COLOR_BGR2RGB)
             return convert_frame_to_pixmap(frame_rgb)
         else:
             return QPixmap()  # Return empty pixmap if failed
@@ -1372,13 +1379,13 @@ class DuplicateFinderWorker(QThread):
         """
         frame_count = get_frame_count(video_path)
         middle_frame = frame_count // 2
-        cap = cv2.VideoCapture(video_path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+        cap = VideoCapture(video_path)
+        cap.set(CAP_PROP_POS_FRAMES, middle_frame)
         ret, frame = cap.read()
         cap.release()
 
         if ret:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_rgb = cvtColor(frame, COLOR_BGR2RGB)
             return convert_frame_to_pixmap(frame_rgb)
         else:
             return QPixmap()  # Return empty pixmap if failed
@@ -1392,7 +1399,7 @@ def shred_file(file_path, passes=1):
             length = os.path.getsize(file_path)
             for _ in range(passes):
                 f.seek(0)
-                f.write(bytearray(random.getrandbits(8) for _ in range(length)))
+                f.write(bytearray(getrandbits(8) for _ in range(length)))
         os.remove(file_path)
         print(f"File shredded: {file_path}")
     except Exception as e:

@@ -1,10 +1,13 @@
 import os
-import hashlib
 from PIL import Image
 import pillow_avif
-import imagehash
+from imagehash import phash, hex_to_hash
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import cv2
+from cv2 import VideoCapture, CAP_PROP_FRAME_COUNT, CAP_PROP_POS_FRAMES, cvtColor, COLOR_BGR2RGB, CAP_PROP_FRAME_WIDTH, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FPS
+import logging_wrapper
+
+# Setup the logger
+logging_wrapper.setup_logger()
 
 def resize_image(file_path, target_size=(500, 500), min_size=(256, 256)):
     """
@@ -18,23 +21,31 @@ def resize_image(file_path, target_size=(500, 500), min_size=(256, 256)):
             if original_width > min_size[0] and original_height > min_size[1]:
                 # Calculate the new size, maintaining aspect ratio
                 img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                logging_wrapper.log_info(f"Image was resized: {img}")
             else:
                 print(f"Image {file_path} is smaller than minimum size, skipping resizing.")
 
             # Ensure the image is still valid after resizing
             if img is None:
+                logging_wrapper.log_error(f"Image became None after resizing.")
                 raise ValueError("Image became None after resizing.")
 
             return img.copy()  # Return a copy of the image to avoid 'NoneType' issues
     except Exception as e:
         print(f"Error resizing image {file_path}: {e}")
+        logging_wrapper.log_error(f"Unable to resize the image: {img}")
         return None
 
 def calculate_phash(image):
     """
     Calculate the perceptual hash (pHash) of an image.
     """
-    return str(imagehash.phash(image))
+    logging_wrapper.log_info(f'Trying to calculate P-Hash...')
+    try:
+        image_phash = phash(image)
+        return str(image_phash)
+    except Exception as e:
+        logging_wrapper.log_error(f'Failed to calculate the PHash: {e}')
 
 def hamming_distance(hash1, hash2):
     """
@@ -51,6 +62,7 @@ def get_image_resolution(file_path):
     """
     Get the resolution (width x height) of an image.
     """
+    logging_wrapper.log_info(f'Trying to calculate image resolution...')
     with Image.open(file_path) as img:
         width, height = img.size
         return width * height, (width, height)
@@ -63,9 +75,11 @@ def process_image(file_path, target_size=(500, 500), min_size=(256, 256)):
         resized_image = resize_image(file_path, target_size, min_size)
         file_hash = calculate_phash(resized_image)
         resolution, original_dimensions = get_image_resolution(file_path)
+        logging_wrapper.log_info(f'Processed an image: {resized_image}')
         return file_path, file_hash, resolution, original_dimensions
     except Exception as e:
         print(f"Skipping {file_path}: {e}")
+        logging_wrapper.log_error(f"Error in processing image: {e}")
         return None
 
 def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500), min_size=(256, 256), hash_threshold=1):
@@ -89,6 +103,7 @@ def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500),
                 all_files.append(file_path)
 
     total_files = len(all_files)
+    logging_wrapper.log_info(f'Found {total_files} files that need to be checked for duplicates.')
     processed_count = 0
 
     # Use a ProcessPoolExecutor to process images in parallel
@@ -103,6 +118,7 @@ def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500),
             results.append(result)
 
             processed_count += 1
+            logging_wrapper.log_info(f"Processed one image...")
             if progress_callback:
                 progress_callback(int((processed_count / total_files) * 100))
 
@@ -162,8 +178,8 @@ def get_frame_count(video_path):
     """
     Get the total number of frames in a video.
     """
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap = VideoCapture(video_path)
+    total_frames = int(cap.get(CAP_PROP_FRAME_COUNT))
     cap.release()
     return total_frames
 
@@ -171,13 +187,13 @@ def extract_frame(video_path, frame_number):
     """
     Extract a specific frame from a video file.
     """
-    cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)  # Set to the specific frame
+    cap = VideoCapture(video_path)
+    cap.set(CAP_PROP_POS_FRAMES, frame_number)  # Set to the specific frame
     ret, frame = cap.read()
     cap.release()
 
     if ret:
-        return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        return Image.fromarray(cvtColor(frame, COLOR_BGR2RGB))
     else:
         return None
 
@@ -195,7 +211,7 @@ def calculate_dynamic_phash_for_frames(video_path, percentages=[0.05, 0.5, 0.8])
         frame_number = int(frame_count * percentage)
         frame = extract_frame(video_path, frame_number)
         if frame:
-            frame_hash = imagehash.phash(frame)
+            frame_hash = phash(frame)
             hashes.append(str(frame_hash))
         else:
             hashes.append(None)
@@ -263,7 +279,7 @@ def find_video_duplicates(folder_path, progress_callback=None, hash_threshold=2)
 
             # Calculate the Hamming distance between the frame hashes
             is_duplicate = all(
-                abs(imagehash.hex_to_hash(h1) - imagehash.hex_to_hash(h2)) <= hash_threshold
+                abs(hex_to_hash(h1) - hex_to_hash(h2)) <= hash_threshold
                 for h1, h2 in zip(video_hashes1, video_hashes2)
             )
 
@@ -279,9 +295,9 @@ def get_video_resolution(video_path):
     """
     Get the resolution of a video as (width, height).
     """
-    cap = cv2.VideoCapture(video_path)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap = VideoCapture(video_path)
+    width = int(cap.get(CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(CAP_PROP_FRAME_HEIGHT))
     cap.release()
     return width, height  # Return width and height as a tuple
 
@@ -289,9 +305,9 @@ def get_video_runtime(video_path):
         """
         Get the runtime (duration) of the video in HH:MM:SS format.
         """
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap = VideoCapture(video_path)
+        fps = cap.get(CAP_PROP_FPS)
+        frame_count = int(cap.get(CAP_PROP_FRAME_COUNT))
         cap.release()
 
         total_seconds = frame_count / fps
