@@ -1,5 +1,5 @@
 
-[![Full-Logo-Transparent-No-Buffer.png](https://i.postimg.cc/VNsRb7K6/Full-Logo-Transparent-No-Buffer.png)](https://i.postimg.cc/jSDjnPss/IconOnly.png)
+[![IconOnly.png](https://i.postimg.cc/jSDjnPss/IconOnly.png)](https://postimg.cc/K1ybdKkV)
 
 # Copy Cleaner - Easy media deduplication
 
