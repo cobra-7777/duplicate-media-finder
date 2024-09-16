@@ -5,7 +5,7 @@
   </a>
 </p>
 
-# Copy Cleaner - Easy media deduplication
+# Copy Cleaner - Easy Media Deduplication
 
 Copy Cleaner is a robust desktop application designed to help you efficiently locate and manage duplicate images and videos on your systems. With an intuitive graphical user interface (GUI) built using PyQt, this tool leverages advanced algorithms for identifying duplicates based on perceptual hashing, file resolution, and file properties. 
 
@@ -29,14 +29,17 @@ You can easily review duplicates side-by-side with visual previews (inspired by 
     - No outbound or inbound internet connections are made. 
     - No images or image thumbnails  are stored anywhere - its all kept in memory.
     - Different deletion types, including secure file shredding up to 15 passes, to ensure your deleted content cannot be restored.
+    - The logs that CopyCleaner produces are purely for troubleshooting purposes. They do not contain any identifying information, nor do they contain any image or video information. The logs are never uploaded anywhere, and remain on your local machine.
     - Open source and free - you're free to check the code.
+
+- **Logging**: CopyCleaner only logs a few of its internal processes, to assist in troubleshooting. If you open an Issue here on Github, please attach the logfiles. These logfiles are stored locally, in a folder called "logs" next to your EXE file.
 
 
 ## Installation
 
 Simply download the latest release on the right hand side menu of this Github page, where it says "Releases". Extract the archive, and run the EXE file, and you're ready to go!
 
-If you wish to run the code on your own, you are free to clone it and make your own EXE, or run it directly from your IDE or terminal. I will not be helping anyone do this. If you dont know how, use the EXE i am providing.
+If you wish to run the code on your own, you are free to clone it and make your own EXE, or run it directly from your IDE or terminal. I will not be helping anyone do this, as i am providing a fully functional EXE file. 
 
 ## Usage
 
@@ -44,8 +47,9 @@ If you wish to run the code on your own, you are free to clone it and make your 
 - Review the detected duplicates, make your selection, and choose your preferred deletion method.
     
 ## Screenshots
+[![2024-09-16-23-21-17-Copy-Cleaner-Easy-Media-Deduplication.png](https://i.postimg.cc/15PCzrrq/2024-09-16-23-21-17-Copy-Cleaner-Easy-Media-Deduplication.png)](https://postimg.cc/YjnfngVr)
 
-![App Screenshot](https://via.placeholder.com/468x300?text=App+Screenshot+Here)
+[![2024-09-16-23-28-56-Review-Duplicates.png](https://i.postimg.cc/pXZ055s1/2024-09-16-23-28-56-Review-Duplicates.png)](https://postimg.cc/2V1dPyR4)
 
 
 ## Tech Stack
