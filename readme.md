@@ -1,5 +1,5 @@
 
-[![IconOnly.png](https://i.postimg.cc/jSDjnPss/IconOnly.png)](https://postimg.cc/K1ybdKkV)
+[![IconOnly.png](https://i.postimg.cc/gkJz18Lv/IconOnly.png)](https://postimg.cc/Cd3pqZN1)
 
 # Copy Cleaner - Easy media deduplication
 
