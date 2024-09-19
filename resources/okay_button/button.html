@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="button_style.css">
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body style="margin: 0; padding: 0; background-color: #111111;">
+    <div class="button-borders" id="okay_button">
+        <button class="primary-button"> Okay
+        </button>
+      </div>
+    <script>
+        // Initialize the WebChannel and connect to the pywebchannel object in Python
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            window.pywebchannel = channel.objects.pywebchannel;
+        });
+
+        document.getElementById('okay_button').addEventListener('click', function() {
+            // Send a message to Python when the button is clicked
+            pywebchannel.buttonClicked('okay_button');
+        });
+    </script>
+</body>
+</html>

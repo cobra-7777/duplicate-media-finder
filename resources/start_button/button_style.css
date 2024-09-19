@@ -1,0 +1,39 @@
+button {
+  padding: 1.3em 3em;
+  font-size: 22px;
+  text-transform: uppercase;
+  letter-spacing: 2.0px;
+  font-weight: 500;
+  color: #fff;  /* White text */
+  background-color: #7B1DDE; /* Primary color */
+  border: none;
+  border-radius: 45px;
+  box-shadow: 0px 8px 15px rgba(123, 29, 222, 0.4); /* Subtle shadow with primary color */
+  transition: all 0.3s ease 0s;
+  cursor: pointer;
+  outline: none;
+  width: 250px;
+  height: 55px;
+  line-height: 0.2em;
+  vertical-align: middle;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Font set to Segoe UI */
+}
+
+button:hover {
+  background-color: #D55378; /* Hover color using secondary theme */
+  box-shadow: 0px 15px 20px rgba(213, 83, 120, 0.5); /* Shadow using secondary theme */
+  transform: translateY(-7px); /* Lift effect on hover */
+}
+
+button:active {
+  transform: translateY(-1px); /* Slight press effect on click */
+}
+
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;  /* Makes sure the container takes the full height of the view */
+    margin: 0;
+}

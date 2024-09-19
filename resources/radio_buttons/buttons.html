@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="buttons_style.css">
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body style="margin: 0; padding: 0; background-color: #111111;">
+    <div class="container">
+        <form id="radio-form">
+            <label>
+                <input type="radio" name="radio" id="photos-radio" checked>
+                <span>Search for Photos</span>
+            </label>
+            <label>
+                <input type="radio" name="radio" id="videos-radio">
+                <span>Search for Videos</span>
+            </label>
+        </form>
+    </div>
+
+    <script>
+        // Initialize the WebChannel and connect to the pywebchannel object in Python
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            window.pywebchannel = channel.objects.pywebchannel;
+        });
+
+        // Listen for changes on the radio buttons
+        document.getElementById('radio-form').addEventListener('change', function() {
+            const isPhotosSelected = document.getElementById('photos-radio').checked;
+            const isVideosSelected = document.getElementById('videos-radio').checked;
+
+            // Send the selected option to Python
+            if (isPhotosSelected) {
+                pywebchannel.buttonClicked('photo_mode');  // Call Python for photos
+            } else if (isVideosSelected) {
+                pywebchannel.buttonClicked('video_mode');  // Call Python for videos
+            }
+        });
+    </script>
+</body>
+</html>

@@ -3,23 +3,48 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QMessageBox, QScrollArea, QVBoxLayout, QWidget, QHBoxLayout, QFrame, QSpacerItem, QSizePolicy, QCheckBox, QDialog, QComboBox, QRadioButton, QProgressBar
 )
 from PyQt5.QtGui import QPixmap, QFont, QImage, QIcon
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject, pyqtSlot
 from duplicate_detector import find_duplicates, get_image_resolution, get_frame_count, find_video_duplicates, get_video_resolution, get_video_runtime  # Import the duplicate detection module
 import os
 from random import getrandbits
 from cv2 import VideoCapture, cvtColor, COLOR_BGR2RGB, CAP_PROP_POS_FRAMES
 from pywinstyles import apply_style
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebChannel import QWebChannel
 import logging_wrapper
 
-## TODO: ICONS next to important stuff
-## TODO: FONTS
-## TODO: DISPLAY IMAGE SIZE
-## TODO: Ui work, progress bar/dynamic loading icons
-## BUG: Not correct deletion when theres 3 duplicates in varying sizes. - might be fix, test 3 images in differing res
-## TODO: Change button color etc, find a style, for example purple.
+## TODO: Make sure QWebengines are loaded before window is showed, to avoid white flashes
+## TODO: nice buttons throughout the app
+
+
+
 
 # Setup the logger
 logging_wrapper.setup_logger()
+
+class Bridge(QObject):
+    def __init__(self, window):
+        super().__init__()
+        self.window = window  # This is the main window that has the methods we want to call
+
+    @pyqtSlot(str)
+    def buttonClicked(self, button_id, data=None):
+        # Depending on the button clicked, we call different functions
+        if button_id == "start_button":
+            self.window.start_processing()  # Call the function for the Start button
+        elif button_id == "choose_folder":
+            self.window.choose_folder()  # Call the function for choosing a folder
+        elif button_id == "video_mode":
+            self.window.scanmode = "video"  # Call the video mode processing
+        elif button_id == "photo_mode":
+            self.window.scanmode = "photo"  # Call the photo mode processing
+        elif button_id == 'okay_button':
+            if isinstance(self.window, QDialog):
+                self.window.accept()
+            else:
+                print('Not a dialog window.')
+        else:
+            print(f"Unknown button: {button_id}")
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -50,7 +75,7 @@ class DuplicateImageFinder(QMainWindow):
         # Set the title and locked size of the window
         self.setWindowTitle('CopyCleaner - Easy Media Deduplication')
         self.width = 600
-        self.height = 700
+        self.height = 760
         self.setFixedSize(self.width, self.height)
         self.setStyleSheet('background-color: #111111;')
         self.setWindowIcon(QIcon(resource_path('resources/IconOnly.ico')))
@@ -65,31 +90,21 @@ class DuplicateImageFinder(QMainWindow):
         self.logo_pixmap = QPixmap(resource_path('resources/FullLogo.png'))  # Replace with the path to your logo
         self.logo_label.setPixmap(self.logo_pixmap.scaled(300, 300, Qt.KeepAspectRatio))
         self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setFixedSize(300, 300)
+        self.logo_label.setFixedSize(300, 240)
         self.logo_label.move((self.width - 300) // 2, 0)  # Center the logo at the top
-
+        
         # Button to choose folder
-        self.folder_button = QPushButton('Choose Folder', self)
-        self.folder_button.setFixedSize(180, 40)
-        self.folder_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        self.folder_button.setFont(self.button_font)
-        self.folder_button.move((self.width - 180) // 2, 300)  # Center the button below the logo
-        self.folder_button.clicked.connect(self.choose_folder)
+        self.folder_button = QWebEngineView(self)
+        self.folder_button.setFixedSize(200,205)
+        self.folder_button.setUrl(QUrl.fromLocalFile(resource_path('resources/folder_button/button.html')))
+        self.folder_button.move((self.width - 200) // 2, 240)
+
+        # Set up the web channel to communicate with JS
+        self.folder_channel = QWebChannel(self.folder_button.page())
+        self.bridge = Bridge(self)  # Pass self (the window) to the Bridge class
+        self.folder_channel.registerObject('pywebchannel', self.bridge)  # Register the Python object
+        self.folder_button.page().setWebChannel(self.folder_channel)
+
 
         # Widget to hold both icon and text
         folder_widget = QWidget(self)
@@ -113,67 +128,33 @@ class DuplicateImageFinder(QMainWindow):
         # Set folder_widget properties and add it to the main window
         folder_widget.setLayout(folder_layout)
         folder_widget.setFixedSize(600, 40)
-        folder_widget.move((self.width - 600) // 2, 340)  # Position widget
+        folder_widget.move((self.width - 600) // 2, 420)  # Position widget
 
         self.folder_label = folder_text_label  # To access the text label directly later
 
-        #Radio buttons
-        self.photo_radio = QRadioButton('Search for Photo Duplicates', self)
-        self.video_radio = QRadioButton('Search for Video Duplicates', self)
-        self.photo_radio.setFixedSize(215,30)
-        self.video_radio.setFixedSize(215,30)
-        self.photo_radio.setChecked(True)
-        self.photo_radio.move((self.width - 215) // 2, 400)
-        self.video_radio.move((self.width - 215) // 2, 430)
-        radio_button_style = """
-            QRadioButton {
-                color: white; /* Text color for a dark background */
-                background-color: transparent; /* Background color */
-                spacing: 10px; /* Space between indicator and text */
-            }
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 8px; /* Makes the indicator round */
-            }
-            QRadioButton::indicator::unchecked {
-                border: 2px solid #CCCCCC; /* Lighter border for unchecked state */
-                background-color: #333333; /* Dark gray background for unchecked */
-                border-radius: 8px; /* Rounded corners for indicator */
-            }
-            QRadioButton::indicator::checked {
-                border: 2px solid #932CC3; /* Border color when checked */
-                background-color: #AC3AA7; /* Checked color */
-                border-radius: 8px; /* Rounded corners for indicator */
-            }
-        """
-        self.photo_radio.setStyleSheet(radio_button_style)
-        self.video_radio.setStyleSheet(radio_button_style)
-        self.photo_radio.setFont(self.text_font)
-        self.video_radio.setFont(self.text_font)
+        # Radio buttons
+        self.radio_buttons = QWebEngineView(self)
+        self.radio_buttons.setFixedSize(250,90)
+        self.radio_buttons.setUrl(QUrl.fromLocalFile(resource_path('resources/radio_buttons/buttons.html')))
+        self.radio_buttons.move((self.width - 250) // 2, 485)
+        self.scanmode = "photo"
+
+        # Set up the web channel to communicate with JS
+        self.radio_channel = QWebChannel(self.radio_buttons.page())
+        self.radio_channel.registerObject('pywebchannel', self.bridge)  # Register the Python object
+        self.radio_buttons.page().setWebChannel(self.radio_channel)
+
 
         # Start button
-        self.start_button = QPushButton('Search for Duplicates', self)
-        self.start_button.setFixedSize(250, 55)
-        self.start_button.move((self.width - 250) // 2, 500)  # Center the button below the folder label
-        self.start_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        self.start_button.setFont(self.button_font)
-        self.start_button.clicked.connect(self.start_processing)
+        self.start_button = QWebEngineView(self)
+        self.start_button.setFixedSize(300,120)
+        self.start_button.setUrl(QUrl.fromLocalFile(resource_path('resources/start_button/button.html')))
+        self.start_button.move((self.width - 300) // 2, 575)
+
+        # Set up the web channel to communicate with JS
+        self.start_channel = QWebChannel(self.start_button.page())
+        self.start_channel.registerObject('pywebchannel', self.bridge)  # Register the Python object
+        self.start_button.page().setWebChannel(self.start_channel)
 
         # Progress bar for loading widgets
         self.progress_bar = QProgressBar(self)
@@ -219,10 +200,11 @@ class DuplicateImageFinder(QMainWindow):
             return
 
         self.start_button.setVisible(False)
+        self.radio_buttons.setVisible(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
-        search_type = 'photo' if self.photo_radio.isChecked() else 'video'
+        search_type = self.scanmode
         self.worker_thread = DuplicateFinderWorker(self.selected_folder, search_type)
         self.worker_thread.progress_update.connect(self.progress_bar.setValue)
         self.worker_thread.comparison_complete.connect(self.on_comparison_complete)
@@ -231,23 +213,26 @@ class DuplicateImageFinder(QMainWindow):
     def on_comparison_complete(self, comparison_results):
         if not comparison_results:
             self.reset_ui()
-            success_dialog = SuccessDialog('All Good!', "We've searched far and wide, but it seems that there\nare no duplicate media files in this directory. Yay!")
+            success_dialog = SuccessDialog('All Good!', "We've searched far and wide, but it seems that there\nare no duplicate media files in this directory. Yay!", self.bridge)
             success_dialog.exec_()
             logging_wrapper.log_info('Processing returned no duplicates found.')
             #self.reset_ui()
             return
 
         # Prepare the comparison window based on the results
-        if self.photo_radio.isChecked():
+        if self.scanmode == "photo":
             self.show_comparison_window(comparison_results)
-        elif self.video_radio.isChecked():
+        elif self.scanmode == "video":
             self.show_comparison_window_videos(comparison_results)
+        else:
+            logging_wrapper.log_error('No scanmode chosen...')
 
         self.reset_ui()
 
     def reset_ui(self):
         """Reset the UI to initial state after processing is complete."""
         self.start_button.setVisible(True)
+        self.radio_buttons.setVisible(True)
         self.progress_bar.setVisible(False)
         self.progress_bar.setValue(0)
 
@@ -808,7 +793,7 @@ class ErrorDialog(QDialog):
         self.setLayout(layout)
 
 class SuccessDialog(QDialog):
-    def __init__(self, title, text):
+    def __init__(self, title, text, bridge):
         super().__init__()
         self.setWindowTitle(title)
         self.setFixedSize(400, 160)
@@ -842,34 +827,43 @@ class SuccessDialog(QDialog):
         #layout.addItem(space_below_separator)
 
         # Confirm button
-        confirm_button = QPushButton("Okay")
-        confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
-        confirm_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        confirm_button.setFont(QFont('Calibri Bold', 16))
-        confirm_button.setFixedSize(220, 30)
+        #confirm_button = QPushButton("Okay")
+        #confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
+        #confirm_button.setStyleSheet("""
+        #    QPushButton {
+        #        background-color: #AC3AA7;
+        #        border: 3px solid #982FBD;
+        #        border-radius: 10px;
+        #        color: black;
+        #    }
+        #    QPushButton:hover {
+        #        background-color: #D45379;
+        #        border-color: #982FBD;
+        #    }
+        #    QPushButton:pressed {
+        #        background-color: #AC3AA7;
+        #        border-color: #982FBD;
+        #    }
+        #""")
+        #confirm_button.setFont(QFont('Calibri Bold', 16))
+        #confirm_button.setFixedSize(220, 30)
+        self.confirm_button = QWebEngineView(self)
+        self.confirm_button.setFixedSize(250,55)
+        self.confirm_button.setUrl(QUrl.fromLocalFile(resource_path('resources/okay_button/button.html')))
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        button_layout.addWidget(confirm_button)
+        button_layout.addWidget(self.confirm_button)
         button_layout.addStretch()
 
         layout.addLayout(button_layout)
         layout.addStretch()
+
+        # Set up the web channel for communication between JS and Python
+        self.channel = QWebChannel(self.confirm_button.page())
+        self.bridge = Bridge(self)  # Use the passed bridge instance
+        self.channel.registerObject('pywebchannel', self.bridge)
+        self.confirm_button.page().setWebChannel(self.channel)
 
         self.setLayout(layout)
 

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="button_style.css">
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body style="margin: 0; padding: 0; background-color: #111111;">
+    <div class="container">
+        <div class="folder">
+          <div class="front-side">
+            <div class="tip"></div>
+            <div class="cover"></div>
+          </div>
+          <div class="back-side cover"></div>
+        </div>
+        <label class="custom-file-upload" id="choose-folder-btn">
+          Choose Folder
+        </label>
+      </div>
+      <script>
+        // Initialize the WebChannel and connect to the pywebchannel object in Python
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            window.pywebchannel = channel.objects.pywebchannel;
+        });
+
+        document.getElementById('choose-folder-btn').addEventListener('click', function() {
+            // Send a message to Python when the button is clicked
+            pywebchannel.buttonClicked('choose_folder');
+        });
+    </script>
+</body>
+</html>
