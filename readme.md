@@ -47,9 +47,9 @@ If you wish to run the code on your own, you are free to clone it and make your 
 - Review the detected duplicates, make your selection, and choose your preferred deletion method.
     
 ## Screenshots
-[![2024-09-16-23-21-17-Copy-Cleaner-Easy-Media-Deduplication.png](https://i.postimg.cc/15PCzrrq/2024-09-16-23-21-17-Copy-Cleaner-Easy-Media-Deduplication.png)](https://postimg.cc/YjnfngVr)
+[![mainmenu.png](https://i.postimg.cc/bNTR8GgJ/mainmenu.png)](https://postimg.cc/8j7vmzqQ)
 
-[![2024-09-16-23-28-56-Review-Duplicates.png](https://i.postimg.cc/pXZ055s1/2024-09-16-23-28-56-Review-Duplicates.png)](https://postimg.cc/2V1dPyR4)
+[![comparison.png](https://i.postimg.cc/mk62NyRk/comparison.png)](https://postimg.cc/V0n8zMJP)
 
 
 ## Tech Stack
