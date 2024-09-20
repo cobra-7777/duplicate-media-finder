@@ -1,0 +1,70 @@
+.button {
+    position: relative;
+    border-radius: 6px;
+    width: 250px;
+    height: 50px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    border: 1px solid #cc0000;
+    background-color: #e50000;
+    overflow: hidden;
+    font-family: 'Segoe UI', sans-serif;  /* Set font to Segoe UI */
+  }
+  
+  .button,
+  .button__icon,
+  .button__text {
+    transition: all 0.3s;
+  }
+  
+  .button .button__text {
+    transform: translateX(90px);
+    color: #fff;
+    font-weight: 600;
+    font-size: 18px;  /* Increased font size */
+  }
+  
+  .button .button__icon {
+    position: absolute;
+    transform: translateX(145px);
+    height: 100%;
+    width: 50px;
+    background-color: #cc0000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .button .svg {
+    width: 20px;
+  }
+  
+  .button:hover {
+    background: #cc0000;
+  }
+  
+  .button:hover .button__text {
+    color: transparent;
+  }
+  
+  .button:hover .button__icon {
+    width: 240px;
+    transform: translateX(0);
+  }
+  
+  .button:active .button__icon {
+    background-color: #b20000;
+  }
+  
+  .button:active {
+    border: 1px solid #b20000;
+  }
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;  /* Makes sure the container takes the full height of the view */
+    margin: 0;
+}

@@ -15,8 +15,11 @@ import logging_wrapper
 
 ## TODO: Make sure QWebengines are loaded before window is showed, to avoid white flashes
 ## TODO: nice buttons throughout the app
+## REMINDER: If a QWebEngineView button is a white box, you need to defer its rendering with QTimer. 
+## ^ See show_deletion_dialog and draw_deletion_dialog. Deferring is basically letting the GUI finish before loading the next.
 
-
+#os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9222"  # This opens a debug port
+#os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--enable-logging --v=1"
 
 
 # Setup the logger
@@ -43,8 +46,20 @@ class Bridge(QObject):
                 self.window.accept()
             else:
                 print('Not a dialog window.')
+        elif button_id == 'delete_button':
+            if isinstance(self.window, QDialog):
+                self.window.accept()
+            else:
+                print("Not a dialog window.")
+        elif button_id == 'review_button':
+            self.window.show_deletion_dialog()
         else:
             print(f"Unknown button: {button_id}")
+
+    @pyqtSlot(int)
+    def updateButtonText(self, count):
+        # Call the JS function in the loaded QWebEngineView to update the button text
+        self.window.delete_button.page().runJavaScript(f"updateButtonText({count});")
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -193,11 +208,6 @@ class DuplicateImageFinder(QMainWindow):
             logging_wrapper.log_info(f"Folder: '{folder}' was selected.")
 
     def start_processing(self):
-        if not self.selected_folder:
-            error_dialog = ErrorDialog("Error", "Please select a folder that contains media files,\nor subfolders with media files to search through.")
-            error_dialog.exec_()
-            logging_wrapper.log_error("A folder with no media files was chosen.")
-            return
 
         self.start_button.setVisible(False)
         self.radio_buttons.setVisible(False)
@@ -211,9 +221,16 @@ class DuplicateImageFinder(QMainWindow):
         self.worker_thread.start()
 
     def on_comparison_complete(self, comparison_results):
+        if not self.selected_folder:
+            self.reset_ui()
+            error_dialog = ErrorDialog("Error", "Please select a folder that contains media files,\nor subfolders with media files to search through.")
+            error_dialog.exec_()
+            logging_wrapper.log_error("A folder with no media files was chosen.")
+            return
+        
         if not comparison_results:
             self.reset_ui()
-            success_dialog = SuccessDialog('All Good!', "We've searched far and wide, but it seems that there\nare no duplicate media files in this directory. Yay!", self.bridge)
+            success_dialog = SuccessDialog('All Good!', "We've searched far and wide, but it seems that there\nare no duplicate media files in this directory. Yay!")
             success_dialog.exec_()
             logging_wrapper.log_info('Processing returned no duplicates found.')
             #self.reset_ui()
@@ -393,33 +410,38 @@ class ComparisonWindow(QMainWindow):
         self.comparison_results = comparison_results
         self.current_index = 0
 
-        # Timer for incremental loading
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.load_next_batch)
-        self.timer.start(10)  # Adjust the interval as needed
-
         # Delete button, initially hidden
-        self.delete_button = QPushButton('Review Deletion', self)
-        self.delete_button.clicked.connect(self.show_deletion_dialog)
-        self.delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        self.delete_button.setFixedSize(240,45)
-        self.delete_button.setFont(self.button_font)
-        self.delete_button.hide()  # Start hidden
+        #self.delete_button = QPushButton('Review Deletion', self)
+        #self.delete_button.clicked.connect(self.show_deletion_dialog)
+        #self.delete_button.setStyleSheet("""
+        #    QPushButton {
+        #        background-color: #AC3AA7;
+        #        border: 3px solid #982FBD;
+        #        border-radius: 10px;
+        #        color: black;
+        #    }
+        #    QPushButton:hover {
+        #        background-color: #D45379;
+        #        border-color: #982FBD;
+        #    }
+        #    QPushButton:pressed {
+        #        background-color: #AC3AA7;
+        #        border-color: #982FBD;
+        #    }
+        #""")
+        #self.delete_button.setFixedSize(240,45)
+        #self.delete_button.setFont(self.button_font)
+        #self.delete_button.hide()  # Start hidden
+
+        self.delete_button = QWebEngineView(self)
+        self.delete_button.setFixedSize(300,55)
+        self.delete_button.setUrl(QUrl.fromLocalFile(resource_path('resources/review_button/button.html')))
+        self.delete_button.hide()
+
+        self.delete_channel = QWebChannel(self.delete_button.page())
+        self.bridge = Bridge(self)
+        self.delete_channel.registerObject('pywebchannel', self.bridge)
+        self.delete_button.page().setWebChannel(self.delete_channel)
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()  # Add stretchable space to the left
@@ -430,6 +452,10 @@ class ComparisonWindow(QMainWindow):
 
         # Initialize the batch size
         self.batch_size = 8  # Number of items to load per batch
+        # Timer for incremental loading
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.load_next_batch)
+        self.timer.start(10)  # Adjust the interval as needed
 
         central_widget = QWidget()
         central_widget.setLayout(self.main_layout)
@@ -442,8 +468,9 @@ class ComparisonWindow(QMainWindow):
                 self.timer.stop()
                 # Hide progress bar and show delete button when done
                 self.progress_bar.hide()
-                self.update_delete_button_text()
                 self.delete_button.show()
+                # Add a slight delay before updating the button text
+                QTimer.singleShot(100, self.update_delete_button_text)
                 return
 
             to_keep, to_delete = self.comparison_results[self.current_index]
@@ -578,15 +605,21 @@ class ComparisonWindow(QMainWindow):
         # Count the checked checkboxes
         marked_for_deletion = sum(checkbox.isChecked() for checkbox in self.checkboxes)
         # Update the button text
-        self.delete_button.setText(f'Review Deletion ({marked_for_deletion})')
+        #self.delete_button.setText(f'Review Deletion ({marked_for_deletion})')
+        self.delete_button.page().runJavaScript(f'updateButtonText({marked_for_deletion})')
 
     def show_deletion_dialog(self):
+        # Defer the deletion dialog display
+        QTimer.singleShot(0, self.draw_deletion_dialog)
+
+    def draw_deletion_dialog(self):
         num_files = len([checkbox for checkbox in self.checkboxes if checkbox.isChecked()])
+
         if num_files == 0:
             error_dialog = ErrorDialog('Error', 'Whoops!\nSeems like you forgot to mark any files for deletion.')
             error_dialog.exec_()
             return
-        
+
         dialog = DeletionConfirmationDialog(num_files)
         if dialog.exec_() == QDialog.Accepted:
             self.delete_progress_bar.setVisible(True)
@@ -692,30 +725,39 @@ class DeletionConfirmationDialog(QDialog):
         layout.addItem(spacer)
 
         # Confirm button
-        confirm_button = QPushButton("Delete Selected Duplicates")
-        confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
-        confirm_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        confirm_button.setFont(QFont('Calibri Bold', 16))
-        confirm_button.setFixedSize(270, 50)
+        #confirm_button = QPushButton("Delete Selected Duplicates")
+        #confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
+        #confirm_button.setStyleSheet("""
+        #    QPushButton {
+        #        background-color: #AC3AA7;
+        #        border: 3px solid #982FBD;
+        #        border-radius: 10px;
+        #        color: black;
+        #    }
+        #    QPushButton:hover {
+        #        background-color: #D45379;
+        #        border-color: #982FBD;
+        #    }
+        #    QPushButton:pressed {
+        #        background-color: #AC3AA7;
+        #        border-color: #982FBD;
+        #    }
+        #""")
+        #confirm_button.setFont(QFont('Calibri Bold', 16))
+        #confirm_button.setFixedSize(270, 50)
+
+        self.confirm_button = QWebEngineView(self)
+        self.confirm_button.setFixedSize(270,50)
+        self.confirm_button.setUrl(QUrl.fromLocalFile(resource_path('resources/delete_button/button.html')))
+        self.channel = QWebChannel(self.confirm_button.page())
+        self.bridge = Bridge(self)
+        self.channel.registerObject('pywebchannel', self.bridge)
+        self.confirm_button.page().setWebChannel(self.channel)
+
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        button_layout.addWidget(confirm_button)
+        button_layout.addWidget(self.confirm_button)
         button_layout.addStretch()
 
         layout.addLayout(button_layout)
@@ -725,7 +767,62 @@ class DeletionConfirmationDialog(QDialog):
 
     def get_deletion_type(self):
         return self.deletion_type_combo.currentText()
-    
+        
+
+class SuccessDialog(QDialog):
+    def __init__(self, title, text):
+        super().__init__()
+        self.setWindowTitle(title)
+        self.setFixedSize(400, 160)
+        apply_style(self, "dark")
+        self.setWindowIcon(QIcon(resource_path('resources/success.ico')))
+        self.setStyleSheet('background-color: #111111;')
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout()
+
+        # Number of files to delete
+        label = QLabel(f"{text}")
+        label.setFont(QFont('Segoe UI', 12))
+        label.setStyleSheet('color: white;')
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
+
+        space_above_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        layout.addItem(space_above_separator)
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Plain)
+        separator.setStyleSheet("background-color: #932CC3;")  # #932CC3
+        separator.setMinimumHeight(4)
+        layout.addWidget(separator)
+        layout.addStretch()
+
+
+        space_below_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        #layout.addItem(space_below_separator)
+
+        # Confirm button
+        self.confirm_button = QWebEngineView(self)
+        self.confirm_button.setFixedSize(250,55)
+        self.confirm_button.setUrl(QUrl.fromLocalFile(resource_path('resources/okay_button/button.html')))
+        # Set up the web channel for communication between JS and Python
+        self.channel = QWebChannel(self.confirm_button.page())
+        self.bridge = Bridge(self)  # Use the passed bridge instance
+        self.channel.registerObject('pywebchannel', self.bridge)
+        self.confirm_button.page().setWebChannel(self.channel)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.confirm_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+        layout.addStretch()
+
+        self.setLayout(layout)
+
 class ErrorDialog(QDialog):
     def __init__(self, title, text):
         super().__init__()
@@ -760,110 +857,22 @@ class ErrorDialog(QDialog):
         space_below_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
         #layout.addItem(space_below_separator)
 
-        # Confirm button
-        confirm_button = QPushButton("Okay")
-        confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
-        confirm_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        confirm_button.setFont(QFont('Calibri Bold', 16))
-        confirm_button.setFixedSize(220, 30)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(confirm_button)
-        button_layout.addStretch()
-
-        layout.addLayout(button_layout)
-        layout.addStretch()
-
-        self.setLayout(layout)
-
-class SuccessDialog(QDialog):
-    def __init__(self, title, text, bridge):
-        super().__init__()
-        self.setWindowTitle(title)
-        self.setFixedSize(400, 160)
-        apply_style(self, "dark")
-        self.setWindowIcon(QIcon(resource_path('resources/success.ico')))
-        self.setStyleSheet('background-color: #111111;')
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-
-        layout = QVBoxLayout()
-
-        # Number of files to delete
-        label = QLabel(f"{text}")
-        label.setFont(QFont('Segoe UI', 12))
-        label.setStyleSheet('color: white;')
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label)
-
-        space_above_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
-        layout.addItem(space_above_separator)
-
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Plain)
-        separator.setStyleSheet("background-color: #932CC3;")  # #932CC3
-        separator.setMinimumHeight(4)
-        layout.addWidget(separator)
-        layout.addStretch()
-
-
-        space_below_separator = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed)
-        #layout.addItem(space_below_separator)
-
-        # Confirm button
-        #confirm_button = QPushButton("Okay")
-        #confirm_button.clicked.connect(self.accept)  # Close dialog on confirm
-        #confirm_button.setStyleSheet("""
-        #    QPushButton {
-        #        background-color: #AC3AA7;
-        #        border: 3px solid #982FBD;
-        #        border-radius: 10px;
-        #        color: black;
-        #    }
-        #    QPushButton:hover {
-        #        background-color: #D45379;
-        #        border-color: #982FBD;
-        #    }
-        #    QPushButton:pressed {
-        #        background-color: #AC3AA7;
-        #        border-color: #982FBD;
-        #    }
-        #""")
-        #confirm_button.setFont(QFont('Calibri Bold', 16))
-        #confirm_button.setFixedSize(220, 30)
-        self.confirm_button = QWebEngineView(self)
-        self.confirm_button.setFixedSize(250,55)
-        self.confirm_button.setUrl(QUrl.fromLocalFile(resource_path('resources/okay_button/button.html')))
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.confirm_button)
-        button_layout.addStretch()
-
-        layout.addLayout(button_layout)
-        layout.addStretch()
-
+        self.error_confirm_button = QWebEngineView(self)
+        self.error_confirm_button.setFixedSize(250,55)
+        self.error_confirm_button.setUrl(QUrl.fromLocalFile(resource_path('resources/okay_button/button.html')))
         # Set up the web channel for communication between JS and Python
-        self.channel = QWebChannel(self.confirm_button.page())
-        self.bridge = Bridge(self)  # Use the passed bridge instance
-        self.channel.registerObject('pywebchannel', self.bridge)
-        self.confirm_button.page().setWebChannel(self.channel)
+        self.error_channel = QWebChannel(self.error_confirm_button.page())
+        self.error_bridge = Bridge(self)  # Use the passed bridge instance
+        self.error_channel.registerObject('pywebchannel', self.error_bridge)
+        self.error_confirm_button.page().setWebChannel(self.error_channel)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.error_confirm_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+        layout.addStretch()
 
         self.setLayout(layout)
 
@@ -1014,33 +1023,38 @@ class ComparisonWindowVideo(QMainWindow):
         self.comparison_results = comparison_results
         self.current_index = 0
 
-        # Timer for incremental loading
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.load_next_batch)
-        self.timer.start(10)  # Adjust the interval as needed
-
         # Delete button, initially hidden
-        self.delete_button = QPushButton('Review Deletion', self)
-        self.delete_button.clicked.connect(self.show_deletion_dialog)
-        self.delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #AC3AA7;
-                border: 3px solid #982FBD;
-                border-radius: 10px;
-                color: black;
-            }
-            QPushButton:hover {
-                background-color: #D45379;
-                border-color: #982FBD;
-            }
-            QPushButton:pressed {
-                background-color: #AC3AA7;
-                border-color: #982FBD;
-            }
-        """)
-        self.delete_button.setFixedSize(240,45)
-        self.delete_button.setFont(self.button_font)
-        self.delete_button.hide()  # Start hidden
+        #self.delete_button = QPushButton('Review Deletion', self)
+        #self.delete_button.clicked.connect(self.show_deletion_dialog)
+        #self.delete_button.setStyleSheet("""
+        #    QPushButton {
+        #        background-color: #AC3AA7;
+        #        border: 3px solid #982FBD;
+        #        border-radius: 10px;
+        #        color: black;
+        #    }
+        #    QPushButton:hover {
+        #        background-color: #D45379;
+        #        border-color: #982FBD;
+        #    }
+        #    QPushButton:pressed {
+        #        background-color: #AC3AA7;
+        #        border-color: #982FBD;
+        #    }
+        #""")
+        #self.delete_button.setFixedSize(240,45)
+        #self.delete_button.setFont(self.button_font)
+        #self.delete_button.hide()  # Start hidden
+
+        self.delete_button = QWebEngineView(self)
+        self.delete_button.setFixedSize(300,55)
+        self.delete_button.setUrl(QUrl.fromLocalFile(resource_path('resources/review_button/button.html')))
+        self.delete_button.hide()
+
+        self.delete_channel = QWebChannel(self.delete_button.page())
+        self.bridge = Bridge(self)
+        self.delete_channel.registerObject('pywebchannel', self.bridge)
+        self.delete_button.page().setWebChannel(self.delete_channel)
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()  # Add stretchable space to the left
@@ -1051,6 +1065,10 @@ class ComparisonWindowVideo(QMainWindow):
 
         # Initialize the batch size
         self.batch_size = 8  # Number of items to load per batch
+        # Timer for incremental loading
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.load_next_batch)
+        self.timer.start(10)  # Adjust the interval as needed
 
         central_widget = QWidget()
         central_widget.setLayout(self.main_layout)
@@ -1063,8 +1081,9 @@ class ComparisonWindowVideo(QMainWindow):
                 self.timer.stop()
                 # Hide progress bar and show delete button when done
                 self.progress_bar_comp.hide()
-                self.update_delete_button_text()
                 self.delete_button.show()
+                # Add a slight delay before updating the button text
+                QTimer.singleShot(100, self.update_delete_button_text)
                 return
 
             to_keep, to_delete = self.comparison_results[self.current_index]
@@ -1200,7 +1219,8 @@ class ComparisonWindowVideo(QMainWindow):
         # Count the checked checkboxes
         marked_for_deletion = sum(checkbox.isChecked() for checkbox in self.checkboxes)
         # Update the button text
-        self.delete_button.setText(f'Review Deletion ({marked_for_deletion})')
+        #self.delete_button.setText(f'Review Deletion ({marked_for_deletion})')
+        self.delete_button.page().runJavaScript(f'updateButtonText({marked_for_deletion})')
 
     def get_video_frame_preview(self, video_path):
         """
@@ -1221,12 +1241,17 @@ class ComparisonWindowVideo(QMainWindow):
 
 
     def show_deletion_dialog(self):
+        # Defer the deletion dialog display
+        QTimer.singleShot(0, self.draw_deletion_dialog)
+
+    def draw_deletion_dialog(self):
         num_files = len([checkbox for checkbox in self.checkboxes if checkbox.isChecked()])
+
         if num_files == 0:
             error_dialog = ErrorDialog('Error', 'Whoops!\nSeems like you forgot to mark any files for deletion.')
             error_dialog.exec_()
             return
-        
+
         dialog = DeletionConfirmationDialog(num_files)
         if dialog.exec_() == QDialog.Accepted:
             self.delete_progress_bar.setVisible(True)

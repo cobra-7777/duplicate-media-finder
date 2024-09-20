@@ -91,6 +91,9 @@ def find_duplicates(folder_path, progress_callback=None, target_size=(500, 500),
     duplicates = []
     processed_files = set()  # Track files that are already marked for deletion or processed
 
+    if not folder_path:
+        return duplicates
+
     #Valid files
     valid_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.heif', '.heic', '.tiff', '.raw', '.avif', '.jxl')
 
